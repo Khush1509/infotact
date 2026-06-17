@@ -5,6 +5,11 @@ import json
 import argparse
 import sys
 import os
+import io
+
+# Fix Windows Unicode encoding issues
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 def parse_issues_markdown(filepath):
     """
@@ -87,15 +92,15 @@ def create_github_issue(token, repo, issue):
     try:
         with urllib.request.urlopen(req) as response:
             res_data = json.loads(response.read().decode('utf-8'))
-            print(f"✅ Created issue #{res_data.get('number')}: '{issue['title']}'")
+            print(f"[OK] Created issue #{res_data.get('number')}: '{issue['title']}'")
             return res_data.get('html_url')
     except urllib.error.HTTPError as e:
         error_msg = e.read().decode('utf-8')
-        print(f"❌ Failed to create issue '{issue['title']}': HTTP {e.code} - {e.reason}")
+        print(f"[FAIL] Failed to create issue '{issue['title']}': HTTP {e.code} - {e.reason}")
         print(f"Details: {error_msg}")
         return None
     except Exception as e:
-        print(f"❌ Error: {str(e)}")
+        print(f"[ERROR] {str(e)}")
         return None
 
 def main():
