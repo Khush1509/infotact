@@ -1,1 +1,2 @@
-# Kafka Analytics Consumer Package
+"""Consumer package for background processing tasks."""
+

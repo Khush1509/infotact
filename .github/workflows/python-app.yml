@@ -39,4 +39,5 @@ jobs:
 
     - name: Run unit tests with pytest
       run: |
+        export PYTHONPATH=src
         pytest src/tests/ -v

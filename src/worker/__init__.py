@@ -1,1 +1,2 @@
-# Background Transcoding Worker Package
+"""Background Transcoding Worker Package for infotact project."""
+
