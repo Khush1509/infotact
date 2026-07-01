@@ -13,33 +13,83 @@ def index():
 @bp.route("/api/upload", methods=["POST"])
 def upload_chunk():
     """
-    Placeholder endpoint for Week 1: Chunked Video Upload API
+    Handle chunked video uploads.
+    Expected form fields:
+      - video_id (optional UUID string). If omitted, a new UUID is generated.
+      - chunk_index (int): zero‑based index of this chunk.
+      - total_chunks (int): total number of chunks for the video.
+      - file: binary chunk payload.
+    Chunks are stored temporarily under the configured UPLOAD_FOLDER in a subdirectory
+    named after the video_id. When the final chunk arrives, all chunks are merged in order
+    to reconstruct the original video file. The merged file is saved as <video_id>.mp4.
     """
+    # Retrieve or generate a video identifier
     video_id = request.form.get("video_id") or str(uuid.uuid4())
-    chunk_index = request.form.get("chunk_index", type=int)
-    total_chunks = request.form.get("total_chunks", type=int)
-    file = request.files.get("file")
+    # Parse integer parameters safely
+    try:
+        chunk_index = int(request.form.get("chunk_index"))
+        total_chunks = int(request.form.get("total_chunks"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid chunk_index or total_chunks"}), 400
 
+    file = request.files.get("file")
     if not file:
         return jsonify({"error": "No file chunk provided"}), 400
 
-    # Ensure upload folder exists
-    os.makedirs(current_app.config["UPLOAD_FOLDER"], exist_ok=True)
+    # Prepare a dedicated directory for this video's chunks
+    upload_root = current_app.config["UPLOAD_FOLDER"]
+    video_dir = os.path.join(upload_root, video_id)
+    os.makedirs(video_dir, exist_ok=True)
 
-    # In Week 1, the intern will implement chunk assembly here.
-    # We will simulate successful storage.
-    file_path = os.path.join(
-        current_app.config["UPLOAD_FOLDER"], f"{video_id}_chunk_{chunk_index}"
-    )
-    file.save(file_path)
+    # Save the incoming chunk
+    chunk_path = os.path.join(video_dir, f"chunk_{chunk_index:05d}")  # zero‑pad for sorting
+    file.save(chunk_path)
 
-    return jsonify(
-        {
-            "message": f"Chunk {chunk_index}/{total_chunks} received successfully",
+    # If this is the final chunk, attempt to assemble the full video
+    if chunk_index == total_chunks - 1:
+        # Verify that all expected chunks are present
+        missing = []
+        for i in range(total_chunks):
+            expected_path = os.path.join(video_dir, f"chunk_{i:05d}")
+            if not os.path.exists(expected_path):
+                missing.append(i)
+        if missing:
+            return jsonify({
+                "error": "Missing chunks",
+                "missing_chunks": missing,
+                "video_id": video_id,
+                "status": "incomplete"
+            }), 400
+        # Assemble the final file
+        final_path = os.path.join(upload_root, f"{video_id}.mp4")
+        try:
+            with open(final_path, "wb") as outfile:
+                for i in range(total_chunks):
+                    chunk_file = os.path.join(video_dir, f"chunk_{i:05d}")
+                    with open(chunk_file, "rb") as infile:
+                        outfile.write(infile.read())
+        except Exception as e:
+            return jsonify({"error": f"Failed to assemble video: {str(e)}"}), 500
+        # Cleanup temporary chunk directory
+        try:
+            for i in range(total_chunks):
+                os.remove(os.path.join(video_dir, f"chunk_{i:05d}"))
+            os.rmdir(video_dir)
+        except Exception:
+            pass  # Non‑critical if cleanup fails
+        return jsonify({
+            "message": "Upload complete and file assembled",
             "video_id": video_id,
-            "status": "processing" if chunk_index < total_chunks - 1 else "completed",
-        }
-    )
+            "file_path": final_path,
+            "status": "completed",
+        })
+    else:
+        # Not the final chunk – acknowledge receipt
+        return jsonify({
+            "message": f"Chunk {chunk_index + 1}/{total_chunks} received",
+            "video_id": video_id,
+            "status": "processing",
+        })
 
 
 @bp.route("/analytics/track", methods=["POST"])
