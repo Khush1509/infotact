@@ -11,4 +11,11 @@ def create_app(config_class=Config):
 
     app.register_blueprint(main_bp)
 
+    # Start background transcoding worker threads
+    try:
+        from worker import start_workers
+    except ImportError:
+        from src.worker import start_workers
+    start_workers()
+
     return app

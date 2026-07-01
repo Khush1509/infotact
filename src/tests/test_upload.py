@@ -1,6 +1,7 @@
 import io
 import os
 import uuid
+from unittest.mock import patch
 from flask import current_app
 
 
@@ -176,3 +177,41 @@ def test_upload_boundary_missing_chunks_during_assembly(client):
     assert json_data["error"] == "Missing chunks"
     assert json_data["missing_chunks"] == [1]
     assert json_data["status"] == "incomplete"
+
+
+@patch("app.routes.queue_transcoding_job")
+def test_upload_queues_transcoding_job(mock_queue_job, app, client):
+    """
+    Test that queue_transcoding_job is called exactly once with proper parameters
+    when the final chunk is uploaded and file is assembled.
+    """
+    video_id = str(uuid.uuid4())
+    chunks = [b"chunk1", b"chunk2"]
+
+    # Upload first chunk
+    data = {
+        "video_id": video_id,
+        "chunk_index": 0,
+        "total_chunks": 2,
+        "file": (io.BytesIO(chunks[0]), "chunk0.bin")
+    }
+    response = client.post("/api/upload", data=data, content_type="multipart/form-data")
+    assert response.status_code == 200
+    assert not mock_queue_job.called
+
+    # Upload final chunk
+    data = {
+        "video_id": video_id,
+        "chunk_index": 1,
+        "total_chunks": 2,
+        "file": (io.BytesIO(chunks[1]), "chunk1.bin")
+    }
+    response = client.post("/api/upload", data=data, content_type="multipart/form-data")
+    assert response.status_code == 200
+
+    # Check mock call
+    mock_queue_job.assert_called_once()
+    args, kwargs = mock_queue_job.call_args
+    # args[0] is the final_path, args[1] is upload_root, args[2] is video_id
+    assert args[2] == video_id
+

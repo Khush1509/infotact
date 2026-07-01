@@ -2,6 +2,11 @@ import os
 import uuid
 from flask import Blueprint, request, jsonify, current_app
 
+try:
+    from worker import queue_transcoding_job
+except ImportError:
+    from src.worker import queue_transcoding_job
+
 bp = Blueprint("main", __name__)
 
 
@@ -77,6 +82,9 @@ def upload_chunk():
             os.rmdir(video_dir)
         except Exception:
             pass  # Non‑critical if cleanup fails
+        # Queue background transcoding task
+        queue_transcoding_job(final_path, upload_root, video_id)
+
         return jsonify({
             "message": "Upload complete and file assembled",
             "video_id": video_id,
