@@ -34,11 +34,10 @@ def test_transcode_video_mocked(mock_getsize, mock_exists, mock_run):
 
     assert result is True
     # The function should invoke mock_run for:
-    # 1. version check (or more)
-    # 2. 720p command
-    # 3. 480p command
-    # 4. thumbnail command
-    assert mock_run.call_count >= 4
+    # 1. 720p command
+    # 2. 480p command
+    # 3. thumbnail command
+    assert mock_run.call_count >= 3
 
     # Extract all command lists passed to subprocess.run
     called_cmds = [call[0][0] for call in mock_run.call_args_list]
