@@ -4,6 +4,7 @@ import tempfile
 import subprocess
 from unittest.mock import patch, MagicMock
 from worker.ffmpeg_worker import transcode_video
+import pytest
 
 
 @patch("subprocess.run")
@@ -71,6 +72,7 @@ def test_transcode_video_mocked(mock_getsize, mock_exists, mock_run):
     assert cmd_thumb_found
 
 
+@pytest.mark.skipif(shutil.which('ffmpeg') is None, reason='FFmpeg not installed')
 def test_transcode_video_integration():
     """
     Integration test that runs the worker on a small, valid dummy video
