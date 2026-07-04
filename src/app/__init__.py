@@ -18,4 +18,9 @@ def create_app(config_class=Config):
         from src.worker import start_workers
     start_workers()
 
+    # Initialize Kafka producer and attach to app
+    from .kafka_producer import KafkaProducer
+    app.kafka_producer = KafkaProducer()
+
+
     return app
