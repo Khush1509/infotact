@@ -1,6 +1,18 @@
 import json
 import logging
-from confluent_kafka import Producer
+try:
+    from confluent_kafka import Producer
+except ImportError:
+    class Producer:
+        """Fallback dummy Producer when confluent_kafka is unavailable."""
+        def __init__(self, conf=None):
+            pass
+        def produce(self, *args, **kwargs):
+            pass
+        def poll(self, timeout=0):
+            pass
+        def flush(self, timeout=10.0):
+            pass
 from .config import Config
 
 class KafkaProducer:

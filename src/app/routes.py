@@ -102,23 +102,35 @@ def upload_chunk():
 
 @bp.route("/analytics/track", methods=["POST"])
 def track_analytics():
-    """
-    Placeholder endpoint for Week 3: Kafka Message Broker Integration
-    """
-    data = request.get_json()
-    if (
-        not data
-        or "video_id" not in data
-        or "event" not in data
-        or "timestamp" not in data
-    ):
-        return jsonify({"error": "Invalid analytics payload"}), 400
+    """Endpoint to receive analytics events for video assets.
 
-    # In Week 3, the intern will publish this payload to a Kafka topic.
-    return jsonify(
-        {
-            "status": "success",
-            "message": "Event queued for streaming",
-            "data_received": data,
-        }
-    )
+    Expected JSON payload:
+        - video_id (str): Identifier of the video.
+        - event (str): One of "play", "pause", "buffer", "complete".
+        - timestamp (str): ISO 8601 timestamp of the event.
+    """
+    data = request.get_json(silent=True)
+    # Basic presence validation
+    required_fields = {"video_id", "event", "timestamp"}
+    if not data or not required_fields.issubset(data.keys()):
+        return jsonify({"error": "Invalid analytics payload: missing required fields"}), 400
+    # Validate event type
+    allowed_events = {"play", "pause", "buffer", "complete"}
+    if data["event"] not in allowed_events:
+        return jsonify({"error": f"Invalid event type: {data['event']}. Allowed: {sorted(allowed_events)}"}), 400
+    # Validate timestamp format (basic ISO8601 check)
+    try:
+        # Accept "Z" suffix for UTC
+        ts = data["timestamp"]
+        if ts.endswith('Z'):
+            ts = ts[:-1] + '+00:00'
+        from datetime import datetime
+        datetime.fromisoformat(ts)
+    except Exception:
+        return jsonify({"error": "Invalid timestamp format"}), 400
+    # In a full implementation, the event would be queued to a message broker.
+    return jsonify({
+        "status": "success",
+        "message": "Event received and validated",
+        "data_received": data,
+    })
