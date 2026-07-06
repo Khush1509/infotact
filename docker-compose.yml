@@ -27,6 +27,19 @@ services:
       - zookeeper
     restart: unless-stopped
 
+  db:
+    image: postgres:15
+    container_name: postgres
+    environment:
+      POSTGRES_USER: infotact
+      POSTGRES_PASSWORD: infotactpwd
+      POSTGRES_DB: infotactdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+
 networks:
   default:
     driver: bridge
