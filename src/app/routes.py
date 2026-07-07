@@ -128,9 +128,16 @@ def track_analytics():
         datetime.fromisoformat(ts)
     except Exception:
         return jsonify({"error": "Invalid timestamp format"}), 400
-    # In a full implementation, the event would be queued to a message broker.
+    # Publish the analytics event to Kafka
+    try:
+        current_app.kafka_producer.send(data)
+    except Exception as e:
+        # Log the error but do not expose internal details to the client
+        current_app.logger.error("Failed to send analytics event to Kafka: %s", e)
+        return jsonify({"error": "Failed to process analytics event"}), 500
+
     return jsonify({
         "status": "success",
-        "message": "Event received and validated",
+        "message": "Event received and forwarded",
         "data_received": data,
     })
