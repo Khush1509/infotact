@@ -1,3 +1,4 @@
+import json
 import logging
 import sys
 import time
@@ -36,11 +37,15 @@ def create_consumer():
 def process_message(msg):
     """Handle a single Kafka message.
 
-    Currently assumes the payload is UTF‑8 text; replace with JSON/Avro parsing as needed.
+    Expects the message payload to be JSON-encoded. Logs the event details.
     """
     try:
-        payload = msg.value().decode("utf-8")
-        logging.info("Received message (offset %d): %s", msg.offset(), payload)
+        payload_bytes = msg.value()
+        payload_str = payload_bytes.decode("utf-8")
+        data = json.loads(payload_str)
+        logging.info("Received event %s for video %s at %s", data.get("event"), data.get("video_id"), data.get("timestamp"))
+    except json.JSONDecodeError as e:
+        logging.error("Failed to parse JSON payload at offset %d: %s", msg.offset(), e)
     except Exception as e:
         logging.error("Error processing message at offset %d: %s", msg.offset(), e)
 
