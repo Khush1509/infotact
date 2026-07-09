@@ -1,6 +1,14 @@
 version: '3.8'
 
+# ─────────────────────────────────────────────────────────────────
+#  Infotact – Full Ecosystem Docker Compose
+#  Services:  zookeeper | kafka | db | api | consumer
+#  Run:       docker compose up --build
+# ─────────────────────────────────────────────────────────────────
+
 services:
+
+  # ── 1. Zookeeper (Kafka dependency) ────────────────────────────
   zookeeper:
     image: wurstmeister/zookeeper:3.4.14
     container_name: zookeeper
@@ -11,6 +19,7 @@ services:
       ZOO_SERVERS: server.1=0.0.0.0:2888:3888
     restart: unless-stopped
 
+  # ── 2. Apache Kafka broker ─────────────────────────────────────
   kafka:
     image: wurstmeister/kafka:2.13-2.8.1
     container_name: kafka
@@ -19,14 +28,16 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://host.docker.internal:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_CREATE_TOPICS: "video-analytics:1:1"
     depends_on:
       - zookeeper
     restart: unless-stopped
 
+  # ── 3. PostgreSQL database ─────────────────────────────────────
   db:
     image: postgres:15
     container_name: postgres
@@ -39,7 +50,53 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: unless-stopped
 
+  # ── 4. Flask API + background transcoding worker ───────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: flask_api
+    ports:
+      - "5000:5000"
+    environment:
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      UPLOAD_FOLDER: /app/storage
+      FLASK_ENV: ${FLASK_ENV:-development}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      DATABASE_URL: postgresql://infotact:infotactpwd@db:5432/infotactdb
+    volumes:
+      - storage_data:/app/storage
+    depends_on:
+      - kafka
+      - db
+    restart: unless-stopped
+
+  # ── 5. Analytics Kafka consumer daemon ─────────────────────────
+  consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile.consumer
+    container_name: analytics_consumer
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: infotactdb
+      DB_USER: infotact
+      DB_PASSWORD: infotactpwd
+    depends_on:
+      - kafka
+      - db
+    restart: unless-stopped
+
+# ─── Named volumes ─────────────────────────────────────────────────
+volumes:
+  db_data:
+  storage_data:
+
+# ─── Network ───────────────────────────────────────────────────────
 networks:
   default:
     driver: bridge
