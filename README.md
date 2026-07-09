@@ -115,14 +115,68 @@ If you prefer to create them manually, you can find the detailed issue specifica
 
 ---
 
-## 🐳 Running services with Docker Compose
+## 🐳 Running the Full Ecosystem with Docker Compose
 
-When you reach Weeks 3 & 4, launch the external services (Kafka, Zookeeper, PostgreSQL) by running:
+The `docker-compose.yml` orchestrates **four services**: Zookeeper, Kafka, PostgreSQL, and the Analytics Consumer.
 
+### Quick Start (single command)
 ```bash
-# Start services in the background
-docker compose up -d
+# Build images and start all services in the background
+docker compose up --build -d
+```
 
-# Stop services
+### Verify all containers are running
+```bash
+docker compose ps
+```
+
+Expected output:
+```
+NAME                  STATUS
+zookeeper             Up
+kafka                 Up
+postgres              Up
+analytics_consumer    Up
+```
+
+### Check consumer logs (live)
+```bash
+docker compose logs -f consumer
+```
+
+### Send a test analytics event
+With Kafka and the consumer running, publish a test `play` event:
+```bash
+# Install kcat (formerly kafkacat) or use docker exec
+docker exec -it kafka bash -c \
+  'echo "{\"video_id\":\"vid_001\",\"event\":\"play\",\"timestamp\":\"2026-01-01T00:00:00Z\"}" | \
+   kafka-console-producer.sh --broker-list localhost:9092 --topic video-analytics'
+```
+
+### Verify the database record
+```bash
+docker exec -it postgres psql -U infotact -d infotactdb \
+  -c "SELECT * FROM video_metrics;"
+```
+
+You should see `total_views = 1` for `vid_001`.
+
+### Environment Variables
+
+| Variable        | Default        | Description                   |
+|-----------------|----------------|-------------------------------|
+| `KAFKA_BROKERS` | `localhost:9092` | Kafka bootstrap address      |
+| `DB_HOST`       | `localhost`    | PostgreSQL host               |
+| `DB_PORT`       | `5432`         | PostgreSQL port               |
+| `DB_NAME`       | `infotactdb`   | Database name                 |
+| `DB_USER`       | `infotact`     | Database user                 |
+| `DB_PASSWORD`   | `infotactpwd`  | Database password             |
+
+### Stopping services
+```bash
+# Stop containers (keeps data volumes)
 docker compose down
+
+# Stop AND remove volumes (wipes database)
+docker compose down -v
 ```
