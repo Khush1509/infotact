@@ -13,6 +13,10 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    defaults:
+      run:
+        working-directory: ./project1
+
     steps:
     - uses: actions/checkout@v4
 

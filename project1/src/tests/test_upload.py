@@ -7,12 +7,11 @@ from flask import current_app
 
 def test_index_route(client):
     """
-    Test that the root route responds with running status.
+    Test that the root route responds with the index HTML page.
     """
     response = client.get("/")
     assert response.status_code == 200
-    json_data = response.get_json()
-    assert json_data["status"] == "running"
+    assert b"<!DOCTYPE html>" in response.data or b"<html" in response.data
 
 
 def test_upload_chunk_basic(client):

@@ -1,6 +1,6 @@
 import os
 import uuid
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, render_template
 
 try:
     from worker import queue_transcoding_job
@@ -12,7 +12,7 @@ bp = Blueprint("main", __name__)
 
 @bp.route("/")
 def index():
-    return jsonify({"status": "running", "message": "Infotact Video Transcoding API"})
+    return render_template("index.html")
 
 
 @bp.route("/api/upload", methods=["POST"])

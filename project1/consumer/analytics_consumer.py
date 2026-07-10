@@ -9,6 +9,7 @@ Run directly:
 
 import json
 import logging
+import os
 import sys
 import time
 
@@ -25,7 +26,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ── Kafka configuration ────────────────────────────────────────────────────
-KAFKA_BROKERS = "localhost:9092"
+KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "localhost:9092")
 TOPIC = "video-analytics"
 GROUP_ID = "analytics-group"
 
