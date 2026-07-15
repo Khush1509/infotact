@@ -78,16 +78,33 @@ WSGI_APPLICATION = 'legaltech_parser.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('DB_NAME', 'legaltech_db'),
-        'USER': os.getenv('DB_USER', 'legaltech_user'),
-        'PASSWORD': os.getenv('DB_PASSWORD', 'legaltech_pass'),
-        'HOST': os.getenv('DB_HOST', 'localhost'),
-        'PORT': os.getenv('DB_PORT', '5432'),
+import os
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Determine if we should use PostgreSQL or fallback to SQLite
+if os.getenv('DB_HOST') == 'db':
+    # Use SQLite for local development when the Docker DB host is not reachable
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
     }
-}
+else:
+    # Default to PostgreSQL (e.g., when running with proper DB configuration)
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.getenv('DB_NAME', 'legaltech_db'),
+            'USER': os.getenv('DB_USER', 'legaltech_user'),
+            'PASSWORD': os.getenv('DB_PASSWORD', 'legaltech_pass'),
+            'HOST': os.getenv('DB_HOST', 'localhost'),
+            'PORT': os.getenv('DB_PORT', '5432'),
+        }
+    }
+
 
 
 # Password validation
