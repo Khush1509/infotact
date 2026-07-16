@@ -12,8 +12,8 @@ class DocumentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Document
-        fields = ['id', 'file', 'uploaded_at']
-        read_only_fields = ['id', 'uploaded_at']
+        fields = ['id', 'file', 'original_filename', 'file_size', 'content_hash', 'storage_backend', 'uploaded_at']
+        read_only_fields = ['id', 'original_filename', 'file_size', 'content_hash', 'storage_backend', 'uploaded_at']
 
 
 class BatchUploadSerializer(serializers.Serializer):
@@ -36,13 +36,22 @@ class BatchUploadSerializer(serializers.Serializer):
     )
 
     def validate_files(self, files):
-        """Validate that every uploaded file is a PDF and within size limits."""
+        """Validate that every uploaded file is a PDF (by content type and magic bytes) and within size limits."""
         errors = []
         for i, f in enumerate(files):
             if f.content_type != 'application/pdf':
                 errors.append(
                     f'File "{f.name}" (index {i}) is not a PDF. '
                     f'Received content type: {f.content_type}.'
+                )
+            # Verify magic bytes
+            pos = f.tell()
+            f.seek(0)
+            header = f.read(5)
+            f.seek(pos)
+            if header != b'%PDF-':
+                errors.append(
+                    f'File "{f.name}" (index {i}) is not a valid PDF (invalid signature).'
                 )
             if f.size > self.MAX_FILE_SIZE:
                 size_mb = f.size / (1024 * 1024)
@@ -53,3 +62,4 @@ class BatchUploadSerializer(serializers.Serializer):
         if errors:
             raise serializers.ValidationError(errors)
         return files
+

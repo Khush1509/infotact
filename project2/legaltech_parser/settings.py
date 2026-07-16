@@ -148,6 +148,10 @@ STATIC_URL = 'static/'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
+# File Storage configuration ('local' or 'mock_s3')
+STORAGE_BACKEND = os.getenv('STORAGE_BACKEND', 'local')
+
+
 # Django REST Framework
 REST_FRAMEWORK = {
     'DEFAULT_PARSER_CLASSES': [

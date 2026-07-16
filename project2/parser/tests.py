@@ -65,7 +65,16 @@ class BatchUploadTests(TestCase):
         data = response.json()
         self.assertEqual(data['count'], 1)
         self.assertEqual(len(data['documents']), 1)
-        self.assertTrue(Document.objects.filter(id=data['documents'][0]['id']).exists())
+        
+        doc_id = data['documents'][0]['id']
+        self.assertTrue(Document.objects.filter(id=doc_id).exists())
+        doc = Document.objects.get(id=doc_id)
+        self.assertEqual(doc.original_filename, 'single.pdf')
+        self.assertEqual(doc.storage_backend, 'local')
+        self.assertEqual(doc.file_size, len(b'%PDF-1.4 test content' + b'\x00' * (1024 - len(b'%PDF-1.4 test content'))))
+        
+        # Verify physical file existence in local storage
+        self.assertTrue(os.path.exists(os.path.join(settings.MEDIA_ROOT, doc.file.name)))
 
     def test_batch_upload_multiple_pdfs(self):
         """Uploading 3 valid PDFs returns 201 with 3 documents."""
@@ -77,6 +86,22 @@ class BatchUploadTests(TestCase):
         self.assertEqual(data['count'], 3)
         self.assertEqual(len(data['documents']), 3)
         self.assertEqual(Document.objects.count(), 3)
+        
+        for doc in Document.objects.all():
+            self.assertTrue(os.path.exists(os.path.join(settings.MEDIA_ROOT, doc.file.name)))
+
+    @override_settings(STORAGE_BACKEND='mock_s3')
+    def test_batch_upload_mock_s3(self):
+        """Uploading a PDF with mock_s3 settings saves it to the mock_s3 directory."""
+        pdf = _make_pdf('s3_contract.pdf')
+        response = self.client.post(self.url, {'files': pdf}, format='multipart')
+
+        self.assertEqual(response.status_code, 201)
+        data = response.json()
+        doc = Document.objects.get(id=data['documents'][0]['id'])
+        self.assertEqual(doc.storage_backend, 'mock_s3')
+        self.assertTrue(doc.file.name.startswith('mock_s3/'))
+        self.assertTrue(os.path.exists(os.path.join(settings.MEDIA_ROOT, doc.file.name)))
 
     # ── Validation / rejection tests ────────────────────────────
 
@@ -85,6 +110,23 @@ class BatchUploadTests(TestCase):
         txt = _make_txt()
         response = self.client.post(self.url, {'files': txt}, format='multipart')
 
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Document.objects.count(), 0)
+
+    def test_batch_upload_rejects_fake_pdf(self):
+        """Uploading a file claiming to be a PDF but lacking the magic signature is rejected."""
+        fake_pdf = SimpleUploadedFile('fake.pdf', b'NOT_A_PDF_CONTENT', content_type='application/pdf')
+        response = self.client.post(self.url, {'files': fake_pdf}, format='multipart')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Document.objects.count(), 0)
+
+    def test_batch_upload_atomic_rollback(self):
+        """If one file in a batch is invalid, all uploads must be rolled back."""
+        pdf = _make_pdf('valid.pdf')
+        fake_pdf = SimpleUploadedFile('fake.pdf', b'NOT_A_PDF_CONTENT', content_type='application/pdf')
+        
+        response = self.client.post(self.url, {'files': [pdf, fake_pdf]}, format='multipart')
         self.assertEqual(response.status_code, 400)
         self.assertEqual(Document.objects.count(), 0)
 
@@ -102,5 +144,6 @@ class BatchUploadTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(Document.objects.count(), 0)
+
 
 
