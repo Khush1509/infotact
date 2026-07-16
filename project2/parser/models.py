@@ -2,8 +2,12 @@ from django.db import models
 
 
 class Document(models.Model):
-    """Represents an uploaded PDF document."""
+    """Represents an uploaded PDF document with storage metadata."""
     file = models.FileField(upload_to='documents/')
+    original_filename = models.CharField(max_length=255, blank=True)
+    file_size = models.BigIntegerField(null=True, blank=True)
+    content_hash = models.CharField(max_length=64, blank=True)
+    storage_backend = models.CharField(max_length=20, choices=[('local', 'Local'), ('mock_s3', 'Mock S3')], default='local')
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
