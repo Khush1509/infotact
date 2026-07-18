@@ -45,6 +45,38 @@ Expected response:
 }
 ```
 
+### Step 4 — Upload Batch PDF Contracts
+Users (like paralegals) can upload batch PDF contracts to the DRF endpoint via `multipart/form-data`:
+```bash
+curl -X POST -F "files=@contract1.pdf" -F "files=@contract2.pdf" http://localhost:8000/api/v1/contracts/upload/
+```
+Expected response:
+```json
+{
+  "count": 2,
+  "documents": [
+    {
+      "id": 1,
+      "file": "/media/documents/uuid_contract1.pdf",
+      "original_filename": "contract1.pdf",
+      "file_size": 1024,
+      "content_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "storage_backend": "local",
+      "uploaded_at": "2026-07-18T12:00:00Z"
+    },
+    {
+      "id": 2,
+      "file": "/media/documents/uuid_contract2.pdf",
+      "original_filename": "contract2.pdf",
+      "file_size": 2048,
+      "content_hash": "3f786850e387550fdab836ed7e6dc881de23001bdec7ae495991b7852b855aa1",
+      "storage_backend": "local",
+      "uploaded_at": "2026-07-18T12:00:05Z"
+    }
+  ]
+}
+```
+
 ---
 
 ## 💻 Local Development Setup
