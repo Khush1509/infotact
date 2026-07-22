@@ -146,4 +146,139 @@ class BatchUploadTests(TestCase):
         self.assertEqual(Document.objects.count(), 0)
 
 
+class ClauseCategorizerTests(TestCase):
+    """Unit tests for ClauseCategorizer NLP and Regex rules."""
+
+    def test_clause_categorization_types(self):
+        """Test categorization across different legal paragraph types."""
+        from .nlp import ClauseCategorizer
+
+        samples = [
+            ("This Agreement shall be governed by and construed in accordance with the laws of the State of New York.", ClauseCategorizer.GOVERNING_LAW),
+            ("Each party agrees to keep confidential all non-public proprietary information disclosed by the other party.", ClauseCategorizer.CONFIDENTIALITY),
+            ("Either party may terminate this agreement upon 30 days written notice.", ClauseCategorizer.TERMINATION),
+            ("Supplier agrees to indemnify, defend and hold harmless Buyer from all third-party claims.", ClauseCategorizer.INDEMNIFICATION),
+            ("In no event shall either party be liable for any indirect, incidental, or consequential damages.", ClauseCategorizer.LIMITATION_OF_LIABILITY),
+            ("Any dispute arising out of this contract shall be submitted to binding arbitration.", ClauseCategorizer.DISPUTE_RESOLUTION),
+            ("All intellectual property rights, trademarks, and patents shall remain the exclusive property of Company.", ClauseCategorizer.INTELLECTUAL_PROPERTY),
+            ("Payment terms are net 30 days from invoice date. Late payments incur interest.", ClauseCategorizer.PAYMENT),
+            ("Neither party shall be liable for failure to perform due to acts of God or force majeure.", ClauseCategorizer.FORCE_MAJEURE),
+            ("The headings in this document are for reference only.", ClauseCategorizer.GENERAL),
+        ]
+
+        for text, expected_cat in samples:
+            cat = ClauseCategorizer.categorize_paragraph(text)
+            self.assertEqual(cat, expected_cat, f"Failed for text: {text}")
+
+    def test_jurisdiction_extraction(self):
+        """Test isolation and extraction of governing law jurisdiction."""
+        from .nlp import ClauseCategorizer
+
+        cases = [
+            (
+                "This Agreement shall be governed by and construed in accordance with the laws of the State of New York, without regard to conflicts of law.",
+                "State of New York"
+            ),
+            (
+                "This contract is governed by the laws of Delaware.",
+                "Delaware"
+            ),
+            (
+                "This Agreement and any dispute arising out of it shall be governed by and interpreted in accordance with the laws of England and Wales.",
+                "England and Wales"
+            ),
+            (
+                "The parties submit to the exclusive jurisdiction of the courts of the State of California.",
+                "State of California"
+            ),
+            (
+                "Governed by the laws of the Commonwealth of Massachusetts.",
+                "Commonwealth of Massachusetts"
+            ),
+            (
+                "This agreement is governed by the laws of Texas.",
+                "Texas"
+            ),
+        ]
+
+        for text, expected_jur in cases:
+            jur = ClauseCategorizer.extract_governing_jurisdiction(text)
+            self.assertEqual(jur, expected_jur, f"Failed extracting jurisdiction for: {text}")
+
+
+class ClauseCategorizationAPITests(TestCase):
+    """Tests for POST /api/v1/clauses/categorize/"""
+
+    url = reverse('categorize_clauses')
+
+    def test_categorize_paragraphs_without_db_save(self):
+        """Posting paragraphs returns categorized list without DB persistence."""
+        payload = {
+            "paragraphs": [
+                {
+                    "clause_number": "Section 1",
+                    "text": "This Agreement shall be governed by the laws of Delaware."
+                },
+                {
+                    "clause_number": "Section 2",
+                    "text": "All information shared hereunder shall remain confidential."
+                }
+            ]
+        }
+        response = self.client.post(self.url, payload, content_type='application/json')
+        self.assertEqual(response.status_code, 200)
+
+        data = response.json()
+        self.assertEqual(data['count'], 2)
+        self.assertFalse(data['saved_to_db'])
+
+        results = data['results']
+        self.assertEqual(results[0]['category'], 'GOVERNING_LAW')
+        self.assertEqual(results[0]['jurisdiction'], 'Delaware')
+        self.assertEqual(results[1]['category'], 'CONFIDENTIALITY')
+        self.assertIsNone(results[1]['jurisdiction'])
+
+    def test_categorize_paragraphs_with_db_save(self):
+        """Posting paragraphs with valid document_id and save_to_db saves records to DB."""
+        from .models import Document, ExtractedClause
+        doc = Document.objects.create(original_filename='test_doc.pdf', storage_backend='local')
+
+        payload = {
+            "document_id": doc.id,
+            "save_to_db": True,
+            "paragraphs": [
+                {
+                    "clause_number": "14.2",
+                    "text": "This Agreement is governed by the laws of the State of New York."
+                }
+            ]
+        }
+        response = self.client.post(self.url, payload, content_type='application/json')
+        self.assertEqual(response.status_code, 201)
+
+        data = response.json()
+        self.assertTrue(data['saved_to_db'])
+        self.assertEqual(data['count'], 1)
+
+        clause_id = data['results'][0]['id']
+        clause_obj = ExtractedClause.objects.get(id=clause_id)
+        self.assertEqual(clause_obj.document, doc)
+        self.assertEqual(clause_obj.clause_number, "14.2")
+        self.assertEqual(clause_obj.category, "GOVERNING_LAW")
+        self.assertEqual(clause_obj.jurisdiction, "State of New York")
+
+    def test_categorize_paragraphs_invalid_document_id(self):
+        """Posting with non-existent document_id returns 404."""
+        payload = {
+            "document_id": 99999,
+            "save_to_db": True,
+            "paragraphs": [
+                {"text": "Sample clause text"}
+            ]
+        }
+        response = self.client.post(self.url, payload, content_type='application/json')
+        self.assertEqual(response.status_code, 404)
+
+
+
 

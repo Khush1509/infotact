@@ -4,7 +4,7 @@ Provides validation and serialization for batch PDF contract uploads.
 """
 
 from rest_framework import serializers
-from .models import Document
+from .models import Document, ExtractedClause
 
 
 class DocumentSerializer(serializers.ModelSerializer):
@@ -14,6 +14,33 @@ class DocumentSerializer(serializers.ModelSerializer):
         model = Document
         fields = ['id', 'file', 'original_filename', 'file_size', 'content_hash', 'storage_backend', 'uploaded_at']
         read_only_fields = ['id', 'original_filename', 'file_size', 'content_hash', 'storage_backend', 'uploaded_at']
+
+
+class ExtractedClauseSerializer(serializers.ModelSerializer):
+    """Serializes ExtractedClause model instances."""
+
+    class Meta:
+        model = ExtractedClause
+        fields = ['id', 'document', 'clause_number', 'text', 'category', 'jurisdiction', 'extracted_at']
+        read_only_fields = ['id', 'extracted_at']
+
+
+class ParagraphItemSerializer(serializers.Serializer):
+    """Serializer for individual paragraph text inputs."""
+    clause_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    text = serializers.CharField(required=True)
+
+
+class ClauseCategorizationRequestSerializer(serializers.Serializer):
+    """Request serializer for categorizing paragraphs and extracting governing law jurisdictions."""
+    document_id = serializers.IntegerField(required=False, allow_null=True)
+    paragraphs = serializers.ListField(
+        child=ParagraphItemSerializer(),
+        min_length=1,
+        help_text='List of paragraphs/clauses to categorize.'
+    )
+    save_to_db = serializers.BooleanField(default=False, help_text='Save extracted clauses to database if document_id is provided.')
+
 
 
 class BatchUploadSerializer(serializers.Serializer):

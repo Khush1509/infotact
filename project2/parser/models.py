@@ -19,6 +19,8 @@ class ExtractedClause(models.Model):
     document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name='clauses')
     clause_number = models.CharField(max_length=50, blank=True, null=True)
     text = models.TextField()
+    category = models.CharField(max_length=100, blank=True, null=True)
+    jurisdiction = models.CharField(max_length=100, blank=True, null=True)
     extracted_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

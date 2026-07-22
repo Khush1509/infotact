@@ -77,6 +77,35 @@ Expected response:
 }
 ```
 
+### Step 5 — Categorize Paragraphs & Extract Governing Law Jurisdiction
+Users can submit contract paragraphs to classify clause types and isolate governing law jurisdictions:
+```bash
+curl -X POST -H "Content-Type: application/json" -d '{
+  "paragraphs": [
+    {
+      "clause_number": "14.1",
+      "text": "This Agreement shall be governed by and construed in accordance with the laws of the State of New York."
+    }
+  ]
+}' http://localhost:8000/api/v1/clauses/categorize/
+```
+Expected response:
+```json
+{
+  "count": 1,
+  "document_id": null,
+  "saved_to_db": false,
+  "results": [
+    {
+      "clause_number": "14.1",
+      "text": "This Agreement shall be governed by and construed in accordance with the laws of the State of New York.",
+      "category": "GOVERNING_LAW",
+      "jurisdiction": "State of New York"
+    }
+  ]
+}
+```
+
 ---
 
 ## 💻 Local Development Setup
