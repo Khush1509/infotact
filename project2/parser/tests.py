@@ -279,6 +279,123 @@ class ClauseCategorizationAPITests(TestCase):
         response = self.client.post(self.url, payload, content_type='application/json')
         self.assertEqual(response.status_code, 404)
 
+    def test_categorize_and_evaluate_risk_with_db_save(self):
+        """Posting risk clauses with save_to_db creates RiskFlag instances in DB."""
+        from .models import Document, ExtractedClause, RiskFlag
+        doc = Document.objects.create(original_filename='risk_doc.pdf', storage_backend='local')
+
+        payload = {
+            "document_id": doc.id,
+            "save_to_db": True,
+            "evaluate_risk": True,
+            "paragraphs": [
+                {
+                    "clause_number": "8.1",
+                    "text": "Supplier agrees to indemnify and hold harmless Buyer against any and all claims without limit. There is no limitation on liability."
+                }
+            ]
+        }
+        response = self.client.post(self.url, payload, content_type='application/json')
+        self.assertEqual(response.status_code, 201)
+
+        data = response.json()
+        self.assertTrue(data['saved_to_db'])
+        clause_id = data['results'][0]['id']
+        clause_obj = ExtractedClause.objects.get(id=clause_id)
+
+        # Check associated RiskFlags in DB
+        flags = RiskFlag.objects.filter(clause=clause_obj)
+        self.assertGreaterEqual(flags.count(), 2)
+
+        flag_types = set(f.flag_type for f in flags)
+        self.assertIn("UNLIMITED_INDEMNITY", flag_types)
+        self.assertIn("UNLIMITED_LIABILITY", flag_types)
+
+
+class RiskEvaluatorTests(TestCase):
+    """Unit tests for RiskEvaluator NLP logic and risk flag detection."""
+
+    def test_sentence_splitting(self):
+        """Test iteration and sentence segmentation from paragraph text."""
+        from .nlp import RiskEvaluator
+
+        text = "First sentence here. Second sentence follows! Third sentence is last?"
+        sentences = RiskEvaluator.split_sentences(text)
+        self.assertEqual(len(sentences), 3)
+        self.assertEqual(sentences[0], "First sentence here.")
+        self.assertEqual(sentences[1], "Second sentence follows!")
+        self.assertEqual(sentences[2], "Third sentence is last?")
+
+    def test_unlimited_indemnity_risk(self):
+        """Test risk detection for uncapped indemnification."""
+        from .nlp import RiskEvaluator
+
+        text = "Supplier agrees to indemnify and hold harmless Buyer against any and all claims without limit."
+        res = RiskEvaluator.evaluate_paragraph(text)
+
+        self.assertTrue(res['has_risk'])
+        self.assertEqual(res['risk_level'], 'HIGH')
+        flag_types = [f['flag_type'] for f in res['risk_flags']]
+        self.assertIn('UNLIMITED_INDEMNITY', flag_types)
+
+    def test_unlimited_liability_risk(self):
+        """Test risk detection for no limitation of liability."""
+        from .nlp import RiskEvaluator
+
+        text = "There shall be no limitation of liability under this agreement."
+        res = RiskEvaluator.evaluate_paragraph(text)
+
+        self.assertTrue(res['has_risk'])
+        self.assertEqual(res['risk_level'], 'HIGH')
+        flag_types = [f['flag_type'] for f in res['risk_flags']]
+        self.assertIn('UNLIMITED_LIABILITY', flag_types)
+
+    def test_unilateral_termination_risk(self):
+        """Test risk detection for unilateral termination without cause."""
+        from .nlp import RiskEvaluator
+
+        text = "Company has the right to terminate at any time without cause."
+        res = RiskEvaluator.evaluate_paragraph(text)
+
+        self.assertTrue(res['has_risk'])
+        flag_types = [f['flag_type'] for f in res['risk_flags']]
+        self.assertIn('UNILATERAL_TERMINATION', flag_types)
+
+    def test_perpetual_confidentiality_risk(self):
+        """Test risk detection for perpetual confidentiality."""
+        from .nlp import RiskEvaluator
+
+        text = "All confidentiality obligations shall survive in perpetuity."
+        res = RiskEvaluator.evaluate_paragraph(text)
+
+        self.assertTrue(res['has_risk'])
+        flag_types = [f['flag_type'] for f in res['risk_flags']]
+        self.assertIn('PERPETUAL_CONFIDENTIALITY', flag_types)
+
+    def test_class_action_waiver_risk(self):
+        """Test risk detection for class action waiver."""
+        from .nlp import RiskEvaluator
+
+        text = "User waives any right to participate in a class action against the provider."
+        res = RiskEvaluator.evaluate_paragraph(text)
+
+        self.assertTrue(res['has_risk'])
+        flag_types = [f['flag_type'] for f in res['risk_flags']]
+        self.assertIn('CLASS_ACTION_WAIVER', flag_types)
+
+    def test_no_risk_clause(self):
+        """Test benign clause returns no risk flags."""
+        from .nlp import RiskEvaluator
+
+        text = "This contract is executed in duplicate copies by authorized representatives."
+        res = RiskEvaluator.evaluate_paragraph(text)
+
+        self.assertFalse(res['has_risk'])
+        self.assertEqual(res['overall_risk_score'], 0.0)
+        self.assertEqual(res['risk_level'], 'LOW')
+        self.assertEqual(len(res['risk_flags']), 0)
+
+
 
 
 

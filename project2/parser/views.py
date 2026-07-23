@@ -8,13 +8,14 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Document, ExtractedClause
+from .models import Document, ExtractedClause, RiskFlag
 from .serializers import (
     BatchUploadSerializer, DocumentSerializer,
-    ClauseCategorizationRequestSerializer, ExtractedClauseSerializer
+    ClauseCategorizationRequestSerializer, ExtractedClauseSerializer,
+    RiskFlagSerializer
 )
 from .storage import save_uploaded_document
-from .nlp import ClauseCategorizer
+from .nlp import ClauseCategorizer, RiskEvaluator
 
 
 
@@ -84,13 +85,14 @@ class BatchUploadView(APIView):
 
 
 class CategorizeClausesView(APIView):
-    """Categorize extracted contract paragraphs and isolate governing law jurisdiction.
+    """Categorize extracted contract paragraphs, isolate governing law jurisdiction, and evaluate risk.
 
     POST /api/v1/clauses/categorize/
     Body (JSON):
     {
         "document_id": 1, (optional)
         "save_to_db": true, (optional)
+        "evaluate_risk": true, (optional)
         "paragraphs": [
             {
                 "clause_number": "12.1",
@@ -107,6 +109,7 @@ class CategorizeClausesView(APIView):
         data = serializer.validated_data
         document_id = data.get('document_id')
         save_to_db = data.get('save_to_db', False)
+        evaluate_risk = data.get('evaluate_risk', True)
         paragraphs = data.get('paragraphs', [])
 
         document = None
@@ -125,7 +128,7 @@ class CategorizeClausesView(APIView):
             for item in paragraphs:
                 clause_number = item.get('clause_number')
                 text = item.get('text', '')
-                res = ClauseCategorizer.process_paragraph(text, clause_number=clause_number)
+                res = ClauseCategorizer.process_paragraph(text, clause_number=clause_number, evaluate_risk=evaluate_risk)
 
                 if document and save_to_db:
                     clause_obj = ExtractedClause.objects.create(
@@ -136,6 +139,18 @@ class CategorizeClausesView(APIView):
                         jurisdiction=res['jurisdiction'],
                     )
                     res['id'] = clause_obj.id
+
+                    if evaluate_risk and res.get('risk_evaluation', {}).get('has_risk'):
+                        saved_flags = []
+                        for flag in res['risk_evaluation']['risk_flags']:
+                            rf_obj = RiskFlag.objects.create(
+                                clause=clause_obj,
+                                flag_type=flag['flag_type'],
+                                description=flag['description'],
+                                confidence_score=flag['confidence_score'],
+                            )
+                            saved_flags.append(RiskFlagSerializer(rf_obj).data)
+                        res['saved_risk_flags'] = saved_flags
 
                 results.append(res)
 
@@ -148,6 +163,3 @@ class CategorizeClausesView(APIView):
             },
             status=status.HTTP_201_CREATED if (document and save_to_db) else status.HTTP_200_OK,
         )
-
-
-

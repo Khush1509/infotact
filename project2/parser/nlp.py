@@ -2,7 +2,7 @@
 """
 
 import re
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class ClauseCategorizer:
@@ -250,15 +250,21 @@ class ClauseCategorizer:
         return final_val
 
     @classmethod
-    def process_paragraph(cls, text: str, clause_number: Optional[str] = None) -> Dict[str, Optional[str]]:
-        """Categorize paragraph and extract jurisdiction if applicable.
+    def process_paragraph(
+        cls,
+        text: str,
+        clause_number: Optional[str] = None,
+        evaluate_risk: bool = True
+    ) -> Dict[str, Any]:
+        """Categorize paragraph, extract jurisdiction, and evaluate legal risks.
 
         Args:
             text (str): Clause text.
             clause_number (Optional[str]): Optional clause identifier.
+            evaluate_risk (bool): Whether to run risk evaluation. Defaults to True.
 
         Returns:
-            Dict containing 'category' and 'jurisdiction'.
+            Dict containing 'clause_number', 'text', 'category', 'jurisdiction', and 'risk_evaluation'.
         """
         category = cls.categorize_paragraph(text)
         jurisdiction = None
@@ -266,9 +272,221 @@ class ClauseCategorizer:
         if category == cls.GOVERNING_LAW or "governed by" in text.lower() or "laws of" in text.lower():
             jurisdiction = cls.extract_governing_jurisdiction(text)
 
-        return {
+        result: Dict[str, Any] = {
             "clause_number": clause_number,
             "text": text,
             "category": category,
             "jurisdiction": jurisdiction,
         }
+
+        if evaluate_risk:
+            risk_eval = RiskEvaluator.evaluate_paragraph(text)
+            result["risk_evaluation"] = risk_eval
+
+        return result
+
+
+class RiskEvaluator:
+    """Evaluates contract text (paragraphs and sentences) for legal risks using rule-based NLP engines."""
+
+    # Risk Flag Types
+    UNLIMITED_INDEMNITY = "UNLIMITED_INDEMNITY"
+    UNLIMITED_LIABILITY = "UNLIMITED_LIABILITY"
+    UNILATERAL_TERMINATION = "UNILATERAL_TERMINATION"
+    PERPETUAL_CONFIDENTIALITY = "PERPETUAL_CONFIDENTIALITY"
+    CLASS_ACTION_WAIVER = "CLASS_ACTION_WAIVER"
+    FOREIGN_JURISDICTION = "FOREIGN_JURISDICTION"
+    UNILATERAL_MODIFICATION = "UNILATERAL_MODIFICATION"
+    SEVERE_PENALTY = "SEVERE_PENALTY"
+    BROAD_IP_TRANSFER = "BROAD_IP_TRANSFER"
+
+    # Risk Rule Definitions
+    RISK_RULES = [
+        {
+            "type": UNLIMITED_INDEMNITY,
+            "patterns": [
+                r"\bindemnify.*without\s+limit\b",
+                r"\bunlimited\s+indemnification\b",
+                r"\bindemnify\s+(?:and\s+hold\s+harmless\s+)?against\s+any\s+and\s+all\s+(?:claims|losses|damages)\b",
+                r"\bindemnify.*for\s+all\s+direct\s+and\s+indirect\s+losses\b",
+                r"\bhold\s+harmless\s+from\s+any\s+and\s+all\b",
+            ],
+            "description": "Clause contains uncapped or broad indemnification obligations.",
+            "base_score": 0.90,
+        },
+        {
+            "type": UNLIMITED_LIABILITY,
+            "patterns": [
+                r"\bno\s+(?:limitation|limit|cap)\s+(?:on|of)\s+liability\b",
+                r"\bliability\s+shall\s+be\s+unlimited\b",
+                r"\bshall\s+be\s+liable\s+for\s+any\s+and\s+all\s+damages\b",
+                r"\bwithout\s+limitation\s+of\s+liability\b",
+                r"\bwaive[s]?\s+any\s+limitation\s+of\s+liability\b",
+            ],
+            "description": "Clause removes or lacks liability caps, exposing the entity to unlimited liability.",
+            "base_score": 0.95,
+        },
+        {
+            "type": UNILATERAL_TERMINATION,
+            "patterns": [
+                r"\bterminate\s+at\s+any\s+time\s+without\s+cause\b",
+                r"\bterminate\s+immediately\s+without\s+notice\b",
+                r"\bimmediate\s+termination\s+without\s+prior\s+notice\b",
+                r"\bsole\s+discretion\s+to\s+terminate\b",
+                r"\bterminate\s+for\s+convenience\s+without\s+notice\b",
+            ],
+            "description": "Allows unilateral termination without cause or notice.",
+            "base_score": 0.85,
+        },
+        {
+            "type": PERPETUAL_CONFIDENTIALITY,
+            "patterns": [
+                r"\bconfidentiality\s+obligations?\s+shall\s+survive\s+(?:in\s+perpetuity|indefinitely|forever)\b",
+                r"\bkeep\s+confidential\s+in\s+perpetuity\b",
+                r"\bsurvive\s+termination\s+indefinitely\b",
+                r"\bconfidentiality\s+without\s+(?:time\s+)?limit\b",
+            ],
+            "description": "Imposes perpetual or indefinite confidentiality obligations.",
+            "base_score": 0.75,
+        },
+        {
+            "type": CLASS_ACTION_WAIVER,
+            "patterns": [
+                r"\bwaive[s]?\s+(?:any\s+)?right\s+to\s+participate\s+in\s+a\s+class\s+action\b",
+                r"\bclass\s+action\s+waiver\b",
+                r"\bno\s+class\s+action\b",
+            ],
+            "description": "Contains a waiver of class action litigation rights.",
+            "base_score": 0.80,
+        },
+        {
+            "type": UNILATERAL_MODIFICATION,
+            "patterns": [
+                r"\breserves\s+the\s+right\s+to\s+(?:modify|amend|change)\s+this\s+agreement\s+at\s+any\s+time\b",
+                r"\bmodify\s+(?:these\s+)?terms\s+without\s+(?:prior\s+)?notice\b",
+                r"\bsole\s+discretion\s+to\s+(?:change|amend)\b",
+            ],
+            "description": "Allows one party to unilaterally modify contract terms without consent.",
+            "base_score": 0.85,
+        },
+        {
+            "type": SEVERE_PENALTY,
+            "patterns": [
+                r"\blate\s+fee\s+of\s+(?:[2-9]\d|\d{3})%\b",
+                r"\bpenalty\s+interest\s+rate\s+of\b",
+                r"\bliquidated\s+damages\s+of\s+\$\d{5,}\b",
+            ],
+            "description": "Clause specifies severe financial penalties or high late fees.",
+            "base_score": 0.80,
+        },
+        {
+            "type": BROAD_IP_TRANSFER,
+            "patterns": [
+                r"\birrevocably\s+assigns?\s+all\s+(?:right,?\s+title,?\s+and\s+interest|intellectual\s+property)\b",
+                r"\bassigns?\s+all\s+pre-existing\s+(?:ip|intellectual\s+property)\b",
+                r"\bwork\s+made\s+for\s+hire\s+transferring\s+all\s+rights\b",
+            ],
+            "description": "Broad or irrevocable assignment of intellectual property rights.",
+            "base_score": 0.85,
+        },
+    ]
+
+    @classmethod
+    def split_sentences(cls, text: str) -> List[str]:
+        """Split paragraph text into individual sentences for sentence-level risk scanning.
+
+        Args:
+            text (str): Full paragraph text.
+
+        Returns:
+            List[str]: List of extracted non-empty sentence strings.
+        """
+        if not text or not text.strip():
+            return []
+        # Split on sentence boundary punctuation (. ! ?) followed by space or newline
+        sentences = re.split(r"(?<=[.!?])\s+|\n+", text)
+        return [s.strip() for s in sentences if s.strip()]
+
+    @classmethod
+    def evaluate_sentence(cls, sentence: str) -> List[Dict[str, Any]]:
+        """Evaluate a single sentence against risk rules.
+
+        Args:
+            sentence (str): Sentence text.
+
+        Returns:
+            List[Dict[str, Any]]: List of triggered risk flags for this sentence.
+        """
+        if not sentence or not sentence.strip():
+            return []
+
+        flags = []
+        sentence_lower = sentence.lower()
+
+        for rule in cls.RISK_RULES:
+            for pattern in rule["patterns"]:
+                if re.search(pattern, sentence_lower, re.IGNORECASE):
+                    flags.append({
+                        "flag_type": rule["type"],
+                        "description": rule["description"],
+                        "confidence_score": rule["base_score"],
+                        "matched_text": sentence.strip(),
+                    })
+                    break  # Prevent duplicate flag of same type for the same sentence
+
+        return flags
+
+    @classmethod
+    def evaluate_paragraph(cls, text: str) -> Dict[str, Any]:
+        """Iterate through extracted paragraph and its sentences to evaluate risk.
+
+        Args:
+            text (str): Full paragraph text.
+
+        Returns:
+            Dict containing 'has_risk', 'overall_risk_score', 'risk_level', and 'risk_flags'.
+        """
+        if not text or not text.strip():
+            return {
+                "has_risk": False,
+                "overall_risk_score": 0.0,
+                "risk_level": "LOW",
+                "risk_flags": [],
+            }
+
+        sentences = cls.split_sentences(text)
+        all_flags: List[Dict[str, Any]] = []
+
+        # Iterate through each extracted sentence to evaluate risk
+        for sentence in sentences:
+            sentence_flags = cls.evaluate_sentence(sentence)
+            all_flags.extend(sentence_flags)
+
+        # Fallback paragraph-level check if sentence split missed pattern
+        if not all_flags:
+            paragraph_flags = cls.evaluate_sentence(text)
+            all_flags.extend(paragraph_flags)
+
+        if not all_flags:
+            return {
+                "has_risk": False,
+                "overall_risk_score": 0.0,
+                "risk_level": "LOW",
+                "risk_flags": [],
+            }
+
+        max_score = max(f["confidence_score"] for f in all_flags)
+        if max_score >= 0.85:
+            risk_level = "HIGH"
+        elif max_score >= 0.70:
+            risk_level = "MEDIUM"
+        else:
+            risk_level = "LOW"
+
+        return {
+            "has_risk": True,
+            "overall_risk_score": max_score,
+            "risk_level": risk_level,
+            "risk_flags": all_flags,
+        }
+

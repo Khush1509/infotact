@@ -4,7 +4,7 @@ Provides validation and serialization for batch PDF contract uploads.
 """
 
 from rest_framework import serializers
-from .models import Document, ExtractedClause
+from .models import Document, ExtractedClause, RiskFlag
 
 
 class DocumentSerializer(serializers.ModelSerializer):
@@ -16,12 +16,22 @@ class DocumentSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'original_filename', 'file_size', 'content_hash', 'storage_backend', 'uploaded_at']
 
 
+class RiskFlagSerializer(serializers.ModelSerializer):
+    """Serializes RiskFlag model instances."""
+
+    class Meta:
+        model = RiskFlag
+        fields = ['id', 'clause', 'flag_type', 'description', 'confidence_score', 'flagged_at']
+        read_only_fields = ['id', 'flagged_at']
+
+
 class ExtractedClauseSerializer(serializers.ModelSerializer):
     """Serializes ExtractedClause model instances."""
+    risk_flags = RiskFlagSerializer(many=True, read_only=True)
 
     class Meta:
         model = ExtractedClause
-        fields = ['id', 'document', 'clause_number', 'text', 'category', 'jurisdiction', 'extracted_at']
+        fields = ['id', 'document', 'clause_number', 'text', 'category', 'jurisdiction', 'risk_flags', 'extracted_at']
         read_only_fields = ['id', 'extracted_at']
 
 
@@ -32,7 +42,7 @@ class ParagraphItemSerializer(serializers.Serializer):
 
 
 class ClauseCategorizationRequestSerializer(serializers.Serializer):
-    """Request serializer for categorizing paragraphs and extracting governing law jurisdictions."""
+    """Request serializer for categorizing paragraphs, extracting governing law jurisdictions, and risk evaluation."""
     document_id = serializers.IntegerField(required=False, allow_null=True)
     paragraphs = serializers.ListField(
         child=ParagraphItemSerializer(),
@@ -40,6 +50,8 @@ class ClauseCategorizationRequestSerializer(serializers.Serializer):
         help_text='List of paragraphs/clauses to categorize.'
     )
     save_to_db = serializers.BooleanField(default=False, help_text='Save extracted clauses to database if document_id is provided.')
+    evaluate_risk = serializers.BooleanField(default=True, help_text='Evaluate paragraphs/sentences for legal risk.')
+
 
 
 

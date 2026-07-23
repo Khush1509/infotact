@@ -77,14 +77,15 @@ Expected response:
 }
 ```
 
-### Step 5 — Categorize Paragraphs & Extract Governing Law Jurisdiction
-Users can submit contract paragraphs to classify clause types and isolate governing law jurisdictions:
+### Step 5 — Categorize Paragraphs, Extract Jurisdiction & Evaluate Risk
+Users can submit contract paragraphs to classify clause types, isolate governing law jurisdictions, and evaluate legal risks across sentences/paragraphs:
 ```bash
 curl -X POST -H "Content-Type: application/json" -d '{
+  "evaluate_risk": true,
   "paragraphs": [
     {
       "clause_number": "14.1",
-      "text": "This Agreement shall be governed by and construed in accordance with the laws of the State of New York."
+      "text": "Supplier agrees to indemnify and hold harmless Buyer against any and all claims without limit. There is no limitation of liability under this agreement."
     }
   ]
 }' http://localhost:8000/api/v1/clauses/categorize/
@@ -98,13 +99,33 @@ Expected response:
   "results": [
     {
       "clause_number": "14.1",
-      "text": "This Agreement shall be governed by and construed in accordance with the laws of the State of New York.",
-      "category": "GOVERNING_LAW",
-      "jurisdiction": "State of New York"
+      "text": "Supplier agrees to indemnify and hold harmless Buyer against any and all claims without limit. There is no limitation of liability under this agreement.",
+      "category": "INDEMNIFICATION",
+      "jurisdiction": null,
+      "risk_evaluation": {
+        "has_risk": true,
+        "overall_risk_score": 0.95,
+        "risk_level": "HIGH",
+        "risk_flags": [
+          {
+            "flag_type": "UNLIMITED_INDEMNITY",
+            "description": "Clause contains uncapped or broad indemnification obligations.",
+            "confidence_score": 0.9,
+            "matched_text": "Supplier agrees to indemnify and hold harmless Buyer against any and all claims without limit."
+          },
+          {
+            "flag_type": "UNLIMITED_LIABILITY",
+            "description": "Clause removes or lacks liability caps, exposing the entity to unlimited liability.",
+            "confidence_score": 0.95,
+            "matched_text": "There is no limitation of liability under this agreement."
+          }
+        ]
+      }
     }
   ]
 }
 ```
+
 
 ---
 
