@@ -395,6 +395,43 @@ class RiskEvaluatorTests(TestCase):
         self.assertEqual(res['risk_level'], 'LOW')
         self.assertEqual(len(res['risk_flags']), 0)
 
+    def test_dangerous_jargon_indemnify(self):
+        """Test risk detection for sentences containing 'indemnify' jargon."""
+        from .nlp import RiskEvaluator
+
+        text = "The vendor shall indemnify the client against any operational losses."
+        res = RiskEvaluator.evaluate_paragraph(text)
+
+        self.assertTrue(res['has_risk'])
+        self.assertGreaterEqual(res['overall_risk_score'], 0.80)
+        flag_types = [f['flag_type'] for f in res['risk_flags']]
+        self.assertTrue('UNLIMITED_INDEMNITY' in flag_types or 'DANGEROUS_JARGON' in flag_types)
+
+    def test_dangerous_jargon_unlimited_liability(self):
+        """Test risk detection for sentences containing 'unlimited liability' jargon."""
+        from .nlp import RiskEvaluator
+
+        text = "The contractor accepts unlimited liability for system downtime."
+        res = RiskEvaluator.evaluate_paragraph(text)
+
+        self.assertTrue(res['has_risk'])
+        self.assertGreaterEqual(res['overall_risk_score'], 0.80)
+        flag_types = [f['flag_type'] for f in res['risk_flags']]
+        self.assertTrue('UNLIMITED_LIABILITY' in flag_types or 'DANGEROUS_JARGON' in flag_types)
+
+    def test_dangerous_jargon_exclusive(self):
+        """Test risk detection for sentences containing 'exclusive' jargon."""
+        from .nlp import RiskEvaluator
+
+        text = "The provider grants an exclusive license to the software in this territory."
+        res = RiskEvaluator.evaluate_paragraph(text)
+
+        self.assertTrue(res['has_risk'])
+        self.assertGreaterEqual(res['overall_risk_score'], 0.80)
+        flag_types = [f['flag_type'] for f in res['risk_flags']]
+        self.assertIn('DANGEROUS_JARGON', flag_types)
+
+
 
 
 

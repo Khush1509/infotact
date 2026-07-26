@@ -1,0 +1,8 @@
+{
+  "venvPath": "project2",
+  "venv": ".venv",
+  "extraPaths": [
+    "project2",
+    "project2/.venv/Lib/site-packages"
+  ]
+}

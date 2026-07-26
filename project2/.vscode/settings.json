@@ -1,6 +1,11 @@
 {
-  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+  "python.defaultInterpreterPath": "c:/Users/hello/Desktop/infotact/project2/.venv/Scripts/python.exe",
   "python.analysis.extraPaths": [
-    "${workspaceFolder}"
-  ]
+    "c:/Users/hello/Desktop/infotact/project2",
+    "c:/Users/hello/Desktop/infotact/project2/.venv/Lib/site-packages"
+  ],
+  "python.analysis.venvPath": "c:/Users/hello/Desktop/infotact/project2",
+  "python.analysis.venv": ".venv"
 }
+
+

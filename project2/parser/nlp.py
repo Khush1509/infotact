@@ -299,6 +299,7 @@ class RiskEvaluator:
     UNILATERAL_MODIFICATION = "UNILATERAL_MODIFICATION"
     SEVERE_PENALTY = "SEVERE_PENALTY"
     BROAD_IP_TRANSFER = "BROAD_IP_TRANSFER"
+    DANGEROUS_JARGON = "DANGEROUS_JARGON"
 
     # Risk Rule Definitions
     RISK_RULES = [
@@ -310,6 +311,9 @@ class RiskEvaluator:
                 r"\bindemnify\s+(?:and\s+hold\s+harmless\s+)?against\s+any\s+and\s+all\s+(?:claims|losses|damages)\b",
                 r"\bindemnify.*for\s+all\s+direct\s+and\s+indirect\s+losses\b",
                 r"\bhold\s+harmless\s+from\s+any\s+and\s+all\b",
+                r"\bindemnify\b",
+                r"\bindemnification\b",
+                r"\bhold\s+harmless\b",
             ],
             "description": "Clause contains uncapped or broad indemnification obligations.",
             "base_score": 0.90,
@@ -322,6 +326,7 @@ class RiskEvaluator:
                 r"\bshall\s+be\s+liable\s+for\s+any\s+and\s+all\s+damages\b",
                 r"\bwithout\s+limitation\s+of\s+liability\b",
                 r"\bwaive[s]?\s+any\s+limitation\s+of\s+liability\b",
+                r"\bunlimited\s+liability\b",
             ],
             "description": "Clause removes or lacks liability caps, exposing the entity to unlimited liability.",
             "base_score": 0.95,
@@ -388,6 +393,18 @@ class RiskEvaluator:
             ],
             "description": "Broad or irrevocable assignment of intellectual property rights.",
             "base_score": 0.85,
+        },
+        {
+            "type": DANGEROUS_JARGON,
+            "patterns": [
+                r"\bexclusive\b",
+                r"\bsole\s+and\s+exclusive\b",
+                r"\bexclusive\s+(?:remedy|jurisdiction|right|license|grant)\b",
+                r"\bunlimited\s+liability\b",
+                r"\bindemnify\b",
+            ],
+            "description": "Sentence contains dangerous legal jargon (e.g., indemnify, unlimited liability, exclusive terms).",
+            "base_score": 0.80,
         },
     ]
 
