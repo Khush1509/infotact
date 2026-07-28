@@ -1,53 +1,38 @@
-# LegalTech Parsing Engine - Foundational Django Project
+# LegalTech Parsing Engine - Detailed Setup Guide
 
-This is the foundational Django project for the **LegalTech Parsing Engine**, configured to connect with a PostgreSQL database.
+## 📖 Overview
+This repository contains the LegalTech Parsing Engine built on **Django 5.x** and **Django REST Framework**. It provides a robust API for uploading PDFs, extracting clauses, categorising them, and evaluating legal risk.
 
 ---
 
 ## 🏗️ Architecture
-
 - **Web Framework:** Django 5.x
-- **Database:** PostgreSQL 15 (running on port `5433` locally to avoid port conflicts with project1)
-- **Configuration:** Managed dynamically via environment variables (`python-dotenv`)
+- **Database:** PostgreSQL 15 (default port `5433` to avoid conflicts with other services)
+- **Configuration:** Environment variables managed with `python-dotenv`
 
 ---
 
 ## 🚀 Quick Start (Docker Compose)
-
-The easiest way to run the application and the database together is using Docker Compose.
-
-### Step 1 — Set up Environment Variables
-Copy the example environment file:
+### 1️⃣ Set up environment variables
 ```bash
 cp .env.example .env
 ```
+Edit `.env` if you need to customise settings (e.g., DB credentials, debug mode).
 
-### Step 2 — Launch Containers
-Build and run the stack:
+### 2️⃣ Launch the stack
 ```bash
 docker compose up --build
 ```
 This starts:
-1. `legaltech_postgres` (PostgreSQL database service)
-2. `legaltech_web` (Django application, automatically applies migrations on startup)
+1. `legaltech_postgres` – PostgreSQL database
+2. `legaltech_web` – Django application (auto‑applies migrations on start)
 
-### Step 3 — Verify the Setup
-Visit the health check endpoint:
+### 3️⃣ Verify the service
 ```bash
 curl http://localhost:8000/health/
 ```
 Expected response:
 ```json
-{
-  "status": "healthy",
-  "database": "connected",
-  "error": null
-}
-```
-
-### Step 4 — Upload Batch PDF Contracts
-Users (like paralegals) can upload batch PDF contracts to the DRF endpoint via `multipart/form-data`:
-```bash
 curl -X POST -F "files=@contract1.pdf" -F "files=@contract2.pdf" http://localhost:8000/api/v1/contracts/upload/
 ```
 Expected response:

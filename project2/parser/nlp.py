@@ -167,7 +167,7 @@ class ClauseCategorizer:
             return cls.GENERAL
 
         # Return category with highest score
-        best_category = max(category_scores, key=category_scores.get)
+        best_category = max(category_scores, key=lambda k: category_scores[k])
         return best_category
 
     @classmethod
@@ -302,7 +302,7 @@ class RiskEvaluator:
     DANGEROUS_JARGON = "DANGEROUS_JARGON"
 
     # Risk Rule Definitions
-    RISK_RULES = [
+    RISK_RULES: List[Dict[str, Any]] = [
         {
             "type": UNLIMITED_INDEMNITY,
             "patterns": [
@@ -441,7 +441,8 @@ class RiskEvaluator:
         sentence_lower = sentence.lower()
 
         for rule in cls.RISK_RULES:
-            for pattern in rule["patterns"]:
+            patterns: List[str] = rule["patterns"]
+            for pattern in patterns:
                 if re.search(pattern, sentence_lower, re.IGNORECASE):
                     flags.append({
                         "flag_type": rule["type"],

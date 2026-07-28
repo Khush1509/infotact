@@ -43,7 +43,8 @@ class BaseStorageBackend:
 
 class LocalStorageBackend(BaseStorageBackend):
     def __init__(self):
-        self.storage = FileSystemStorage(location=os.path.join(settings.MEDIA_ROOT, 'documents'))
+        media_root = str(getattr(settings, 'MEDIA_ROOT', '') or '')
+        self.storage = FileSystemStorage(location=os.path.join(media_root, 'documents'))
 
     def save(self, name: str, file_obj) -> str:
         if not _verify_pdf_magic(file_obj):
@@ -56,7 +57,8 @@ class LocalStorageBackend(BaseStorageBackend):
 class MockS3StorageBackend(BaseStorageBackend):
     def __init__(self):
         # We store mock_s3 files under MEDIA_ROOT/mock_s3
-        self.base_dir = os.path.join(settings.MEDIA_ROOT, 'mock_s3')
+        media_root = str(getattr(settings, 'MEDIA_ROOT', '') or '')
+        self.base_dir = os.path.join(media_root, 'mock_s3')
         os.makedirs(self.base_dir, exist_ok=True)
 
     def save(self, name: str, file_obj) -> str:

@@ -432,6 +432,98 @@ class RiskEvaluatorTests(TestCase):
         self.assertIn('DANGEROUS_JARGON', flag_types)
 
 
+class PDFExtractorTests(TestCase):
+    """Tests for PyMuPDF PDF extraction utilities in pdf_utils.py."""
+
+    def setUp(self):
+        import fitz
+        # Generate a 2-page sample PDF in memory
+        doc = fitz.open()
+        p1 = doc.new_page()
+        p1.insert_text((50, 50), "First Page Contract Text")
+        p2 = doc.new_page()
+        p2.insert_text((50, 50), "Second Page Indemnification Clause")
+        self.pdf_bytes = doc.tobytes()
+        doc.close()
+
+    def test_extract_text_by_page_from_bytes(self):
+        from .pdf_utils import extract_text_by_page
+
+        pages = extract_text_by_page(self.pdf_bytes)
+        self.assertEqual(len(pages), 2)
+        self.assertEqual(pages[0]['page_number'], 1)
+        self.assertIn("First Page Contract Text", pages[0]['text'])
+        self.assertGreater(pages[0]['char_count'], 0)
+        self.assertGreater(pages[0]['word_count'], 0)
+
+        self.assertEqual(pages[1]['page_number'], 2)
+        self.assertIn("Second Page Indemnification Clause", pages[1]['text'])
+
+    def test_extract_text_by_page_from_file(self):
+        from .pdf_utils import extract_text_by_page
+        test_path = os.path.join(TEST_MEDIA_ROOT, "temp_test_doc.pdf")
+        os.makedirs(TEST_MEDIA_ROOT, exist_ok=True)
+        try:
+            with open(test_path, "wb") as f:
+                f.write(self.pdf_bytes)
+
+            pages = extract_text_by_page(test_path)
+            self.assertEqual(len(pages), 2)
+            self.assertIn("First Page Contract Text", pages[0]['text'])
+        finally:
+            if os.path.exists(test_path):
+                os.remove(test_path)
+
+    def test_extract_text_by_page_from_bytesio(self):
+        from .pdf_utils import extract_text_by_page
+        stream = BytesIO(self.pdf_bytes)
+        pages = extract_text_by_page(stream)
+        self.assertEqual(len(pages), 2)
+        self.assertIn("Second Page Indemnification Clause", pages[1]['text'])
+
+    def test_extract_page_text_list(self):
+        from .pdf_utils import extract_page_text_list
+        text_list = extract_page_text_list(self.pdf_bytes)
+        self.assertEqual(len(text_list), 2)
+        self.assertIn("First Page Contract Text", text_list[0])
+        self.assertIn("Second Page Indemnification Clause", text_list[1])
+
+    def test_extract_full_text(self):
+        from .pdf_utils import extract_full_text
+        full_text = extract_full_text(self.pdf_bytes, page_separator=" | ")
+        self.assertIn("First Page Contract Text", full_text)
+        self.assertIn("Second Page Indemnification Clause", full_text)
+        self.assertIn(" | ", full_text)
+
+    def test_extract_text_from_django_document_model(self):
+        from .pdf_utils import extract_text_by_page
+        os.makedirs(TEST_MEDIA_ROOT, exist_ok=True)
+        test_pdf_file = SimpleUploadedFile("sample.pdf", self.pdf_bytes, content_type="application/pdf")
+        doc_obj = Document.objects.create(
+            original_filename="sample.pdf",
+            file_size=len(self.pdf_bytes),
+            content_hash="dummyhash",
+            file=test_pdf_file
+        )
+        try:
+            pages = extract_text_by_page(doc_obj)
+            self.assertEqual(len(pages), 2)
+            self.assertIn("First Page Contract Text", pages[0]['text'])
+        finally:
+            if doc_obj.file and os.path.exists(doc_obj.file.path):
+                os.remove(doc_obj.file.path)
+
+    def test_invalid_source(self):
+        from .pdf_utils import open_pdf
+        with self.assertRaises(ValueError):
+            open_pdf(None)
+        with self.assertRaises(FileNotFoundError):
+            open_pdf("non_existent_file_path_12345.pdf")
+        with self.assertRaises(TypeError):
+            open_pdf(12345)  # Invalid type integer
+
+
+
 
 
 
