@@ -522,6 +522,62 @@ class PDFExtractorTests(TestCase):
         with self.assertRaises(TypeError):
             open_pdf(12345)  # Invalid type integer
 
+    def test_structure_preservation_headers_bullets_paragraphs(self):
+        import fitz
+        from .pdf_utils import extract_text_by_page
+
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((50, 50), "SECTION 1. DEFINITIONS", fontsize=16)
+        page.insert_text((50, 80), "This Agreement sets forth the terms and conditions under which")
+        page.insert_text((50, 95), "the Provider shall render legal technology services to the Client.")
+        page.insert_text((50, 130), "• Service Level Agreement (SLA) terms;")
+        page.insert_text((50, 145), "• Data protection and confidentiality rules;")
+        page.insert_text((50, 160), "1. Compliance with local regulations.")
+        pdf_bytes = doc.tobytes()
+        doc.close()
+
+        pages = extract_text_by_page(pdf_bytes, preserve_structure=True)
+        self.assertEqual(len(pages), 1)
+        pdata = pages[0]
+
+        # Verify extracted header, bullets, and unwrapped paragraph
+        self.assertIn("SECTION 1. DEFINITIONS", pdata['headers'])
+        self.assertGreaterEqual(len(pdata['bullet_points']), 1)
+        self.assertTrue(any("Compliance with local regulations." in b for b in pdata['bullet_points']))
+        self.assertIn("This Agreement sets forth the terms and conditions under which the Provider shall render legal technology services to the Client.", pdata['paragraphs'])
+        self.assertGreater(len(pdata['structured_blocks']), 0)
+
+        # Verify page text includes unwrapped text and preserved structure
+        self.assertIn("SECTION 1. DEFINITIONS", pdata['text'])
+        self.assertIn("under which the Provider shall render", pdata['text'])
+
+    def test_structure_preservation_disabled(self):
+        from .pdf_utils import extract_text_by_page
+        pages = extract_text_by_page(self.pdf_bytes, preserve_structure=False)
+        self.assertEqual(len(pages), 2)
+        self.assertEqual(pages[0]['headers'], [])
+        self.assertEqual(pages[0]['bullet_points'], [])
+        self.assertEqual(pages[0]['paragraphs'], [])
+        self.assertEqual(pages[0]['structured_blocks'], [])
+        self.assertIn("First Page Contract Text", pages[0]['text'])
+
+    def test_soft_hyphen_unwrapping(self):
+        import fitz
+        from .pdf_utils import extract_text_by_page
+
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((50, 50), "The parties enter into an agree-")
+        page.insert_text((50, 65), "ment for professional consulting.")
+        pdf_bytes = doc.tobytes()
+        doc.close()
+
+        pages = extract_text_by_page(pdf_bytes, preserve_structure=True)
+        self.assertEqual(len(pages), 1)
+        self.assertIn("agreement for professional consulting.", pages[0]['text'])
+
+
 
 
 
