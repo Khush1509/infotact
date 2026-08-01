@@ -532,7 +532,7 @@ class ContractEntityExtractor:
         """Lazy load spaCy model with graceful fallback if unavailable."""
         if not cls._model_loaded:
             cls._model_loaded = True
-            if _SPACY_AVAILABLE:
+            if _SPACY_AVAILABLE and spacy is not None:
                 try:
                     cls._nlp_model = spacy.load("en_core_web_sm")
                 except Exception:
