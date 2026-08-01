@@ -4,6 +4,13 @@
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+try:
+    import spacy
+    _SPACY_AVAILABLE = True
+except ImportError:
+    spacy = None
+    _SPACY_AVAILABLE = False
+
 
 class ClauseCategorizer:
     """Categorizes contract paragraphs into legal categories and extracts governing law jurisdictions."""
@@ -272,11 +279,16 @@ class ClauseCategorizer:
         if category == cls.GOVERNING_LAW or "governed by" in text.lower() or "laws of" in text.lower():
             jurisdiction = cls.extract_governing_jurisdiction(text)
 
+        entities = ContractEntityExtractor.extract_entities(text)
+        duration_term = ContractDurationTermExtractor.analyze_duration_and_termination(text)
+
         result: Dict[str, Any] = {
             "clause_number": clause_number,
             "text": text,
             "category": category,
             "jurisdiction": jurisdiction,
+            "entities": entities,
+            "duration_and_termination": duration_term,
         }
 
         if evaluate_risk:
@@ -506,5 +518,325 @@ class RiskEvaluator:
             "overall_risk_score": max_score,
             "risk_level": risk_level,
             "risk_flags": all_flags,
+        }
+
+
+class ContractEntityExtractor:
+    """Extracts contracting parties (counterparty names) and signing/effective dates using spaCy NER and Regex rules."""
+
+    _nlp_model = None
+    _model_loaded = False
+
+    @classmethod
+    def get_nlp_model(cls):
+        """Lazy load spaCy model with graceful fallback if unavailable."""
+        if not cls._model_loaded:
+            cls._model_loaded = True
+            if _SPACY_AVAILABLE:
+                try:
+                    cls._nlp_model = spacy.load("en_core_web_sm")
+                except Exception:
+                    try:
+                        cls._nlp_model = spacy.blank("en")
+                    except Exception:
+                        cls._nlp_model = None
+            else:
+                cls._nlp_model = None
+        return cls._nlp_model
+
+    @classmethod
+    def extract_parties(cls, text: str) -> List[str]:
+        """Extract key contracting parties (counterparty names) from contract text.
+
+        Args:
+            text (str): Contract preamble or full text.
+
+        Returns:
+            List[str]: List of extracted party names.
+        """
+        if not text or not text.strip():
+            return []
+
+        parties: List[str] = []
+        nlp = cls.get_nlp_model()
+
+        # 1. spaCy NER entity extraction
+        if nlp is not None and hasattr(nlp, "pipe_names") and "ner" in nlp.pipe_names:
+            doc = nlp(text[:15000])
+            for ent in doc.ents:
+                if ent.label_ in ("ORG", "PERSON"):
+                    name = ent.text.strip()
+                    cleaned = cls._clean_party_name(name)
+                    if cleaned and cls._is_valid_party_name(cleaned) and cleaned not in parties:
+                        parties.append(cleaned)
+
+        # 2. Regex patterns for party preambles and definitions
+        party_regexes = [
+            r"(?:by\s+and\s+)?between\s+([A-Z0-9][A-Za-z0-9\s,\.\&\'-]+?)\s+(?:\([^\)]+\)\s+)?and\s+([A-Z0-9][A-Za-z0-9\s,\.\&\'-]+?)(?:\s*,|\s*\(|\s+hereinafter|\s+dated|\s*$)",
+            r"([A-Z0-9][A-Za-z0-9\s,\.\&\'-]{2,60})\s*\(\s*[\"'](?:Company|Client|Provider|Vendor|Customer|Contractor|Buyer|Seller|Licensor|Licensee|Party\s+[AB])[\"']\s*\)",
+            r"([A-Z0-9][A-Za-z0-9\s,\.\&\'-]{2,60})\s*,\s*(?:a\s+[A-Za-z\s]+(?:corporation|limited\s+liability\s+company|llc|inc|co|company)?,?\s*)?hereinafter",
+        ]
+
+        for pat in party_regexes:
+            matches = re.finditer(pat, text, re.IGNORECASE)
+            for m in matches:
+                for grp in m.groups():
+                    if grp:
+                        clean_p = cls._clean_party_name(grp)
+                        if clean_p and cls._is_valid_party_name(clean_p) and clean_p not in parties:
+                            parties.append(clean_p)
+
+        return parties
+
+    @classmethod
+    def _clean_party_name(cls, raw: str) -> str:
+        """Clean and normalize raw extracted party string."""
+        if not raw:
+            return ""
+        name = raw.strip()
+        name = re.sub(
+            r"^(?:this\s+agreement\s+(?:is\s+)?entered\s+into\s+by\s+and\s+between|entered\s+into\s+by\s+and\s+between|by\s+and\s+between|between)\s+",
+            "", name, flags=re.IGNORECASE
+        )
+        noise_patterns = [
+            r"\s*\bhereinafter.*$",
+            r"\s*\b(?:each\s+a|collectively|individually).*$",
+            r"\s*\(?\b(?:a|an)\s+(?:State\s+of\s+)?\w+\s+(?:corporation|limited\s+liability\s+company|llc|inc|co|company)\b.*$",
+            r"\s*,?\s*having\s+its\s+principal\s+place\s+of\s+business.*$",
+            r"\s*,?\s*a\s+corporation\b.*$",
+        ]
+        for n in noise_patterns:
+            name = re.sub(n, "", name, flags=re.IGNORECASE).strip()
+        return name.strip(" .,;:\"'()")
+
+    @classmethod
+    def _is_valid_party_name(cls, name: str) -> bool:
+        """Check if extracted candidate string represents a valid party name."""
+        if not name or len(name) < 2 or len(name) > 100:
+            return False
+        invalid_words = {
+            "this agreement", "agreement", "party", "parties", "witnesseth",
+            "whereas", "section", "article", "exhibit", "schedule", "the laws",
+            "state of", "commonwealth of"
+        }
+        if name.lower() in invalid_words:
+            return False
+        return True
+
+    @classmethod
+    def extract_dates(cls, text: str) -> Dict[str, Any]:
+        """Extract signing dates, effective dates, and execution dates from contract text.
+
+        Args:
+            text (str): Contract text.
+
+        Returns:
+            Dict containing 'signing_dates', 'effective_date', and 'all_dates'.
+        """
+        if not text or not text.strip():
+            return {"signing_dates": [], "effective_date": None, "all_dates": []}
+
+        all_dates: List[str] = []
+        signing_dates: List[str] = []
+        effective_date: Optional[str] = None
+
+        nlp = cls.get_nlp_model()
+        if nlp is not None and hasattr(nlp, "pipe_names") and "ner" in nlp.pipe_names:
+            doc = nlp(text[:15000])
+            for ent in doc.ents:
+                if ent.label_ == "DATE":
+                    d_str = ent.text.strip()
+                    if d_str and d_str not in all_dates:
+                        all_dates.append(d_str)
+
+        # Explicit effective date patterns
+        effective_patterns = [
+            r"\beffective\s+(?:as\s+of\s+)?([A-Za-z]+\s+\d{1,2},?\s*\d{4}|\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2})",
+            r"\bdated\s+as\s+of\s+([A-Za-z]+\s+\d{1,2},?\s*\d{4}|\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2})",
+            r"\bcommenc(?:es|ing)\s+on\s+([A-Za-z]+\s+\d{1,2},?\s*\d{4}|\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2})",
+        ]
+        for pat in effective_patterns:
+            m = re.search(pat, text, re.IGNORECASE)
+            if m:
+                effective_date = m.group(1).strip()
+                break
+
+        # Explicit signing date patterns
+        signing_patterns = [
+            r"\bsigned\s+(?:on|this)?\s*([A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s*\d{4}|\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2})",
+            r"\bexecuted\s+(?:on|this)?\s*([A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s*\d{4}|\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2})",
+            r"\bthis\s+(\d{1,2}(?:st|nd|rd|th)?)\s+day\s+of\s+([A-Za-z]+),\s*(\d{4})",
+            r"\bdate:\s*([A-Za-z]+\s+\d{1,2},?\s*\d{4}|\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2})",
+        ]
+        for pat in signing_patterns:
+            matches = re.finditer(pat, text, re.IGNORECASE)
+            for m in matches:
+                if len(m.groups()) == 3:
+                    formatted = f"{m.group(2)} {m.group(1)}, {m.group(3)}"
+                    if formatted not in signing_dates:
+                        signing_dates.append(formatted)
+                elif m.group(1):
+                    d = m.group(1).strip()
+                    if d not in signing_dates:
+                        signing_dates.append(d)
+
+        # Fallback date regex if spaCy returned nothing
+        if not all_dates:
+            general_date_pat = r"\b([A-Za-z]{3,9}\s+\d{1,2},?\s*\d{4}|\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2})\b"
+            for m in re.finditer(general_date_pat, text):
+                d_str = m.group(1).strip()
+                if d_str not in all_dates:
+                    all_dates.append(d_str)
+
+        for d in signing_dates:
+            if d not in all_dates:
+                all_dates.append(d)
+        if effective_date and effective_date not in all_dates:
+            all_dates.append(effective_date)
+
+        return {
+            "signing_dates": signing_dates,
+            "effective_date": effective_date,
+            "all_dates": all_dates,
+        }
+
+    @classmethod
+    def extract_entities(cls, text: str) -> Dict[str, Any]:
+        """Extract all key entities (counterparties and dates)."""
+        parties = cls.extract_parties(text)
+        date_data = cls.extract_dates(text)
+        return {
+            "parties": parties,
+            "signing_dates": date_data["signing_dates"],
+            "effective_date": date_data["effective_date"],
+            "all_dates": date_data["all_dates"],
+        }
+
+
+class ContractDurationTermExtractor:
+    """Identifies and extracts contract duration (term length, renewal) and termination clauses."""
+
+    @classmethod
+    def extract_duration(cls, text: str) -> Dict[str, Any]:
+        """Extract contract term duration length and auto-renewal conditions.
+
+        Args:
+            text (str): Contract clause or document text.
+
+        Returns:
+            Dict containing 'term_length', 'auto_renewal', 'renewal_term', and 'duration_clause_text'.
+        """
+        if not text or not text.strip():
+            return {
+                "term_length": None,
+                "auto_renewal": False,
+                "renewal_term": None,
+                "duration_clause_text": None,
+            }
+
+        term_length: Optional[str] = None
+        auto_renewal = False
+        renewal_term: Optional[str] = None
+        duration_clause_text: Optional[str] = None
+
+        # Term length patterns
+        term_patterns = [
+            r"\b(?:initial\s+term|term\s+of|period\s+of)\b(?:\s+[a-z\s]{1,30})?\s+([0-9]+\s+(?:years?|months?|days?)|one|two|three|four|five|six|seven|eight|nine|ten\s+(?:years?|months?))",
+            r"\b(?:initial\s+term\s+of|term\s+of|period\s+of|shall\s+be)\s+([0-9]+\s+(?:years?|months?|days?)|one|two|three|four|five|six|seven|eight|nine|ten\s+(?:years?|months?))",
+            r"\b([0-9]+\s*(?:-\s*)?(?:year|month|day))\s+(?:initial\s+)?(?:term|period|duration)\b",
+            r"\bcontinue\s+in\s+force\s+for\s+(?:a\s+period\s+of\s+)?([0-9]+\s+(?:years?|months?|days?)|one|two|three|four|five\s+(?:years?|months?))",
+            r"\bfor\s+a\s+term\s+commencing\s+on\s+[^,;\n]+\s+and\s+ending\s+on\s+([A-Za-z]+\s+\d{1,2},?\s*\d{4}|\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{2}-\d{2})",
+        ]
+        for pat in term_patterns:
+            m = re.search(pat, text, re.IGNORECASE)
+            if m:
+                term_length = m.group(1).strip()
+                break
+
+        # Auto-renewal check
+        if re.search(r"\bauto(?:matically)?\s+renew(?:s|al)?\b", text, re.IGNORECASE) or re.search(r"\bsuccessive\s+(?:term|period)s?\b", text, re.IGNORECASE):
+            auto_renewal = True
+
+        renewal_patterns = [
+            r"\bsuccessive\s+(?:periods?|terms?)\s+of\s+([0-9]+\s+(?:years?|months?|days?)|one|two|three\s+(?:years?|months?))",
+            r"\brenew\s+for\s+(?:additional\s+)?(?:terms?|periods?)\s+of\s+([0-9]+\s+(?:years?|months?|days?)|one|two|three\s+(?:years?|months?))",
+            r"\badditional\s+([0-9]+\s*(?:-\s*)?(?:year|month|day))\s+(?:terms?|periods?)\b",
+        ]
+        for pat in renewal_patterns:
+            m = re.search(pat, text, re.IGNORECASE)
+            if m:
+                renewal_term = m.group(1).strip()
+                break
+
+        if term_length or auto_renewal:
+            duration_clause_text = text.strip()
+
+        return {
+            "term_length": term_length,
+            "auto_renewal": auto_renewal,
+            "renewal_term": renewal_term,
+            "duration_clause_text": duration_clause_text,
+        }
+
+    @classmethod
+    def extract_termination_clauses(cls, text: str) -> Dict[str, Any]:
+        """Extract termination conditions, notice periods, and termination grounds.
+
+        Args:
+            text (str): Contract clause or text.
+
+        Returns:
+            Dict containing 'notice_period', 'termination_types', 'has_convenience_termination',
+            'has_cause_termination', and 'termination_clause_text'.
+        """
+        if not text or not text.strip():
+            return {
+                "notice_period": None,
+                "termination_types": [],
+                "has_convenience_termination": False,
+                "has_cause_termination": False,
+                "termination_clause_text": None,
+            }
+
+        notice_period: Optional[str] = None
+        termination_types: List[str] = []
+        has_convenience = False
+        has_cause = False
+
+        # Notice period pattern
+        notice_pat = r"([0-9]+|\bthirty\b|\bsixty\b|\bninety\b|\bfifteen\b)\s*(?:\([0-9]+\)\s*)?days?['’]?\s+(?:prior\s+)?(?:written\s+)?notice"
+        m_notice = re.search(notice_pat, text, re.IGNORECASE)
+        if m_notice:
+            notice_period = f"{m_notice.group(1)} days"
+
+        if re.search(r"\bwithout\s+cause\b|\bfor\s+convenience\b", text, re.IGNORECASE):
+            has_convenience = True
+            termination_types.append("TERMINATION_FOR_CONVENIENCE")
+
+        if re.search(r"\bfor\s+cause\b|\bmaterial\s+breach\b|\bdefault\b", text, re.IGNORECASE):
+            has_cause = True
+            termination_types.append("TERMINATION_FOR_CAUSE")
+
+        if re.search(r"\bimmediate\s+termination\b|\bterminate\s+immediately\b", text, re.IGNORECASE):
+            termination_types.append("IMMEDIATE_TERMINATION")
+
+        termination_clause_text = text.strip() if (termination_types or notice_period) else None
+
+        return {
+            "notice_period": notice_period,
+            "termination_types": termination_types,
+            "has_convenience_termination": has_convenience,
+            "has_cause_termination": has_cause,
+            "termination_clause_text": termination_clause_text,
+        }
+
+    @classmethod
+    def analyze_duration_and_termination(cls, text: str) -> Dict[str, Any]:
+        """Extract both contract duration and termination clause metadata."""
+        duration = cls.extract_duration(text)
+        termination = cls.extract_termination_clauses(text)
+        return {
+            "duration": duration,
+            "termination": termination,
         }
 

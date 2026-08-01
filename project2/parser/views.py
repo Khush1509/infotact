@@ -1,3 +1,4 @@
+from typing import Dict
 from django.shortcuts import render
 from django.http import JsonResponse
 from django.db import connections, transaction
@@ -12,11 +13,13 @@ from .models import Document, ExtractedClause, RiskFlag
 from .serializers import (
     BatchUploadSerializer, DocumentSerializer,
     ClauseCategorizationRequestSerializer, ExtractedClauseSerializer,
-    RiskFlagSerializer
+    RiskFlagSerializer, ContractReviewSerializer
 )
 from .storage import save_uploaded_document
-from .nlp import ClauseCategorizer, RiskEvaluator
-
+from .nlp import (
+    ClauseCategorizer, RiskEvaluator,
+    ContractEntityExtractor, ContractDurationTermExtractor
+)
 
 
 def health_check(request):
@@ -163,3 +166,75 @@ class CategorizeClausesView(APIView):
             },
             status=status.HTTP_201_CREATED if (document and save_to_db) else status.HTTP_200_OK,
         )
+
+
+class ContractReviewView(APIView):
+    """Provides a nested JSON payload of document data, categorized clauses, extracted metadata (parties, dates, duration, termination), and flagged risks for Senior Counsel review.
+
+    GET /api/v1/contracts/<pk>/review/
+    """
+
+    def get(self, request, pk, *args, **kwargs):
+        try:
+            document = Document.objects.prefetch_related('clauses__risk_flags').get(pk=pk)
+        except Document.DoesNotExist:
+            return Response(
+                {'error': f'Document with id {pk} does not exist.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        clauses = list(document.clauses.all())
+        full_text = " \n ".join([c.text for c in clauses if c.text])
+
+        # Extract entities and duration/termination
+        entities_data = ContractEntityExtractor.extract_entities(full_text)
+        duration_data = ContractDurationTermExtractor.extract_duration(full_text)
+        termination_data = ContractDurationTermExtractor.extract_termination_clauses(full_text)
+
+        entity_summary = {
+            "parties": entities_data["parties"],
+            "signing_dates": entities_data["signing_dates"],
+            "effective_date": entities_data["effective_date"],
+            "term_length": duration_data["term_length"],
+            "auto_renewal": duration_data["auto_renewal"],
+            "notice_period": termination_data["notice_period"],
+            "termination_types": termination_data["termination_types"],
+        }
+
+        # Aggregate risk flags across all clauses
+        all_risk_flags = []
+        flag_counts: Dict[str, int] = {}
+        max_score = 0.0
+
+        for clause in clauses:
+            for rf in clause.risk_flags.all():
+                all_risk_flags.append(rf)
+                flag_counts[rf.flag_type] = flag_counts.get(rf.flag_type, 0) + 1
+                if rf.confidence_score and rf.confidence_score > max_score:
+                    max_score = rf.confidence_score
+
+        if max_score >= 0.85:
+            overall_risk_level = "HIGH"
+        elif max_score >= 0.70:
+            overall_risk_level = "MEDIUM"
+        elif all_risk_flags:
+            overall_risk_level = "LOW"
+        else:
+            overall_risk_level = "NONE"
+
+        risk_summary = {
+            "overall_risk_level": overall_risk_level,
+            "total_risk_flags": len(all_risk_flags),
+            "flag_counts_by_type": flag_counts,
+        }
+
+        payload = {
+            "document": document,
+            "entities": entity_summary,
+            "risk_summary": risk_summary,
+            "clauses": clauses,
+            "status": "READY_FOR_REVIEW",
+        }
+
+        serializer = ContractReviewSerializer(payload)
+        return Response(serializer.data, status=status.HTTP_200_OK)

@@ -102,3 +102,30 @@ class BatchUploadSerializer(serializers.Serializer):
             raise serializers.ValidationError(errors)
         return files
 
+
+class ContractEntitySummarySerializer(serializers.Serializer):
+    """Serializes extracted contract entities (parties, dates, duration, termination terms)."""
+    parties = serializers.ListField(child=serializers.CharField(), default=list)
+    signing_dates = serializers.ListField(child=serializers.CharField(), default=list)
+    effective_date = serializers.CharField(allow_null=True, required=False)
+    term_length = serializers.CharField(allow_null=True, required=False)
+    auto_renewal = serializers.BooleanField(default=False)
+    notice_period = serializers.CharField(allow_null=True, required=False)
+    termination_types = serializers.ListField(child=serializers.CharField(), default=list)
+
+
+class RiskAnalysisSummarySerializer(serializers.Serializer):
+    """Serializes high-level risk overview metrics for Senior Counsel review."""
+    overall_risk_level = serializers.CharField()
+    total_risk_flags = serializers.IntegerField()
+    flag_counts_by_type = serializers.DictField(child=serializers.IntegerField(), default=dict)
+
+
+class ContractReviewSerializer(serializers.Serializer):
+    """Nested serializer formatting complete document data, categorized clauses, extracted metadata, and flagged risks for Senior Counsel review."""
+    document = DocumentSerializer()
+    entities = ContractEntitySummarySerializer()
+    risk_summary = RiskAnalysisSummarySerializer()
+    clauses = ExtractedClauseSerializer(many=True)
+    status = serializers.CharField(default="READY_FOR_REVIEW")
+

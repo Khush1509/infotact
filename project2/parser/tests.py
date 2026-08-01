@@ -578,6 +578,195 @@ class PDFExtractorTests(TestCase):
         self.assertIn("agreement for professional consulting.", pages[0]['text'])
 
 
+class ContractEntityExtractorTests(TestCase):
+    """Tests for spaCy NER and Regex party/date extraction in nlp.py (Issue 29)."""
+
+    def test_extract_parties(self):
+        from .nlp import ContractEntityExtractor
+
+        sample_text = (
+            "This Master Services Agreement is entered into by and between Acme Corp, "
+            "a Delaware corporation (\"Company\"), and Beta Solutions LLC (\"Client\"). "
+            "Whereas Party A and Party B desire to enter into this contract."
+        )
+
+        parties = ContractEntityExtractor.extract_parties(sample_text)
+        self.assertTrue(any("Acme Corp" in p for p in parties))
+        self.assertTrue(any("Beta Solutions LLC" in p or "Beta Solutions" in p for p in parties))
+
+    def test_extract_dates(self):
+        from .nlp import ContractEntityExtractor
+
+        sample_text = (
+            "This Agreement is dated as of January 15, 2025 (the \"Effective Date\"), "
+            "and was signed on February 1, 2025 by authorized representatives."
+        )
+
+        date_data = ContractEntityExtractor.extract_dates(sample_text)
+        self.assertEqual(date_data["effective_date"], "January 15, 2025")
+        self.assertIn("February 1, 2025", date_data["signing_dates"])
+        self.assertIn("January 15, 2025", date_data["all_dates"])
+
+
+class ContractDurationTermExtractorTests(TestCase):
+    """Tests for contract duration and termination clause extraction in nlp.py (Issue 30)."""
+
+    def test_extract_duration(self):
+        from .nlp import ContractDurationTermExtractor
+
+        sample_text = (
+            "The initial term of this Agreement shall be 2 years commencing on the Effective Date. "
+            "This Agreement shall automatically renew for successive periods of 1 year unless terminated."
+        )
+
+        res = ContractDurationTermExtractor.extract_duration(sample_text)
+        self.assertEqual(res["term_length"], "2 years")
+        self.assertTrue(res["auto_renewal"])
+        self.assertEqual(res["renewal_term"], "1 year")
+        self.assertIsNotNone(res["duration_clause_text"])
+
+    def test_extract_termination_clauses(self):
+        from .nlp import ContractDurationTermExtractor
+
+        sample_text = (
+            "Either party may terminate this agreement without cause upon 30 days prior written notice. "
+            "Either party may terminate immediately for cause upon material breach."
+        )
+
+        res = ContractDurationTermExtractor.extract_termination_clauses(sample_text)
+        self.assertEqual(res["notice_period"], "30 days")
+        self.assertTrue(res["has_convenience_termination"])
+        self.assertTrue(res["has_cause_termination"])
+        self.assertIn("TERMINATION_FOR_CONVENIENCE", res["termination_types"])
+        self.assertIn("TERMINATION_FOR_CAUSE", res["termination_types"])
+
+
+class ContractReviewAPITests(TestCase):
+    """Tests for GET /api/v1/contracts/<pk>/review/ nested DRF response (Issue 31)."""
+
+    def setUp(self):
+        from .models import Document, ExtractedClause, RiskFlag
+        self.doc = Document.objects.create(
+            original_filename="master_agreement.pdf",
+            file_size=2048,
+            content_hash="abc123hash",
+            storage_backend="local"
+        )
+        self.c1 = ExtractedClause.objects.create(
+            document=self.doc,
+            clause_number="1.1",
+            text="This Agreement is entered into between Acme Corp and Beta LLC on January 15, 2025. Initial term of 3 years.",
+            category="GENERAL"
+        )
+        self.c2 = ExtractedClause.objects.create(
+            document=self.doc,
+            clause_number="5.2",
+            text="Supplier agrees to indemnify and hold harmless Buyer against any and all claims without limit.",
+            category="INDEMNIFICATION"
+        )
+        self.rf = RiskFlag.objects.create(
+            clause=self.c2,
+            flag_type="UNLIMITED_INDEMNITY",
+            description="Broad uncapped indemnification clause",
+            confidence_score=0.90
+        )
+
+    def test_contract_review_endpoint(self):
+        url = reverse('contract_review', kwargs={'pk': self.doc.id})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        data = response.json()
+        self.assertEqual(data["status"], "READY_FOR_REVIEW")
+        
+        # Verify document details
+        self.assertEqual(data["document"]["id"], self.doc.id)
+        self.assertEqual(data["document"]["original_filename"], "master_agreement.pdf")
+
+        # Verify extracted entities
+        self.assertIn("Acme Corp", data["entities"]["parties"])
+        self.assertEqual(data["entities"]["term_length"], "3 years")
+
+        # Verify risk summary
+        self.assertEqual(data["risk_summary"]["overall_risk_level"], "HIGH")
+        self.assertEqual(data["risk_summary"]["total_risk_flags"], 1)
+        self.assertEqual(data["risk_summary"]["flag_counts_by_type"]["UNLIMITED_INDEMNITY"], 1)
+
+        # Verify clauses list
+        self.assertEqual(len(data["clauses"]), 2)
+        clause2 = [c for c in data["clauses"] if c["id"] == self.c2.id][0]
+        self.assertEqual(len(clause2["risk_flags"]), 1)
+        self.assertEqual(clause2["risk_flags"][0]["flag_type"], "UNLIMITED_INDEMNITY")
+
+    def test_contract_review_endpoint_not_found(self):
+        url = reverse('contract_review', kwargs={'pk': 99999})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 404)
+
+
+class DjangoAdminPanelTests(TestCase):
+    """Tests for Django Admin panel customizations (Issue 32)."""
+
+    def setUp(self):
+        from django.contrib.admin.sites import AdminSite
+        from .models import Document, ExtractedClause, RiskFlag
+        from .admin import DocumentAdmin, ExtractedClauseAdmin, RiskFlagAdmin
+
+        self.site = AdminSite()
+        self.doc_admin = DocumentAdmin(Document, self.site)
+        self.clause_admin = ExtractedClauseAdmin(ExtractedClause, self.site)
+        self.risk_admin = RiskFlagAdmin(RiskFlag, self.site)
+
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        pdf_file = SimpleUploadedFile("sample_contract.pdf", b"%PDF-1.4 test content", content_type="application/pdf")
+        self.doc = Document.objects.create(
+            file=pdf_file,
+            original_filename="sample_contract.pdf",
+            file_size=1500000,
+            storage_backend="local"
+        )
+        self.clause = ExtractedClause.objects.create(
+            document=self.doc,
+            clause_number="10.1",
+            text="Governed by the laws of New York.",
+            category="GOVERNING_LAW"
+        )
+        self.risk = RiskFlag.objects.create(
+            clause=self.clause,
+            flag_type="UNLIMITED_LIABILITY",
+            description="Unlimited liability exposure",
+            confidence_score=0.95
+        )
+
+    def test_admin_custom_display_methods(self):
+        # File size display
+        size_str = self.doc_admin.file_size_display(self.doc)
+        self.assertIn("1.43 MB", size_str)
+
+        # PDF view link with file
+        pdf_link = self.doc_admin.view_pdf_link(self.doc)
+        self.assertIn("View PDF", pdf_link)
+
+        # PDF view link without file
+        doc_no_file = Document(file=None, file_size=0)
+        self.assertEqual(self.doc_admin.view_pdf_link(doc_no_file), "No File")
+
+        # Clause count
+        c_count = self.doc_admin.clause_count(self.doc)
+        self.assertEqual(c_count, 1)
+
+        # Clause text preview & risk flag count
+        preview = self.clause_admin.text_preview(self.clause)
+        self.assertEqual(preview, "Governed by the laws of New York.")
+
+        risk_cnt_html = self.clause_admin.risk_flag_count(self.clause)
+        self.assertIn("1 Flags", risk_cnt_html)
+
+        # Risk flag score display
+        score_html = self.risk_admin.confidence_score_display(self.risk)
+        self.assertIn("0.95", score_html)
+
+
 
 
 
